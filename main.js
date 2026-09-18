@@ -11,18 +11,18 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=18";
-import * as ui from "./ui.js?v=18";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=18";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=18";
-import { buildTrack, TRACK_CONFIG } from "./track.js?v=18";
-import { createCameraRig } from "./camera.js?v=18";
-import { loadCarModel, assembleStatic, preloadCarAssets } from "./car-model.js?v=18";
-import { commentate } from "./ai-commentary.js?v=18";
-import * as mp from "./multiplayer.js?v=18";
-import { createPickups } from "./pickups.js?v=18";
-import { createMinimap } from "./minimap.js?v=18";
-import { createSpeedometer } from "./speedometer.js?v=18";
+import * as auth from "./auth.js?v=19";
+import * as ui from "./ui.js?v=19";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=19";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=19";
+import { buildTrack, TRACK_CONFIG } from "./track.js?v=19";
+import { createCameraRig } from "./camera.js?v=19";
+import { loadCarModel, assembleStatic, preloadCarAssets } from "./car-model.js?v=19";
+import { commentate } from "./ai-commentary.js?v=19";
+import * as mp from "./multiplayer.js?v=19";
+import { createPickups } from "./pickups.js?v=19";
+import { createMinimap } from "./minimap.js?v=19";
+import { createSpeedometer } from "./speedometer.js?v=19";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera
@@ -86,13 +86,36 @@ showcaseScene.add(showcase);
 
 let showcaseCar = null;
 let showcaseToken = 0;
+const SHOWCASE_FADE_MS = 280;
+
+/** Cross-fade the hero car: new one fades in over the old, which is then removed.
+ *  Materials are per-instance (car-model.js clones them), so mutating opacity is safe. */
+function fadeSwapShowcase(oldCar, newCar) {
+  const mats = (obj) => { const m = []; obj.traverse((o) => { if (o.isMesh && o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((x) => m.push(x)); }); return m; };
+  const fresh = mats(newCar).map((m) => ({ m, opacity: m.opacity, transparent: m.transparent }));
+  const stale = oldCar ? mats(oldCar).map((m) => ({ m, opacity: m.opacity })) : [];
+  if (oldCar) oldCar.userData.fadeCancelled = true;
+  fresh.forEach((x) => { x.m.transparent = true; x.m.opacity = 0; });
+  const t0 = performance.now();
+  (function tick() {
+    if (newCar.userData.fadeCancelled) { if (oldCar) showcase.remove(oldCar); return; }
+    const k = Math.min(1, (performance.now() - t0) / SHOWCASE_FADE_MS);
+    fresh.forEach((x) => { x.m.opacity = x.opacity * k; });
+    stale.forEach((x) => { x.m.transparent = true; x.m.opacity = x.opacity * (1 - k); });
+    if (k < 1) { requestAnimationFrame(tick); return; }
+    fresh.forEach((x) => { x.m.opacity = x.opacity; x.m.transparent = x.transparent; });
+    if (oldCar) showcase.remove(oldCar);
+  })();
+}
+
 async function setShowcaseCar(carConfig) {
   const token = ++showcaseToken;
   const model = await loadCarModel(carConfig);
   if (token !== showcaseToken) return; // a newer selection won
-  if (showcaseCar) showcase.remove(showcaseCar);
+  const previous = showcaseCar;
   showcaseCar = assembleStatic(model);
   showcase.add(showcaseCar);
+  try { fadeSwapShowcase(previous, showcaseCar); } catch (_) { if (previous) showcase.remove(previous); }
   // GLB failed (slow network)? Try once more a few seconds later.
   if (model.source === "primitive" && !carConfig._retried) {
     carConfig._retried = true;
@@ -395,6 +418,7 @@ function renderCarCards() {
     el.addEventListener("click", () => selectCar(car.id));
     carList.appendChild(el);
   }
+  slideStrip();
 }
 function statRow(label, v) {
   return `<div class="stat"><span>${label}</span><div class="stat-bar"><i style="width:${Math.round(v * 100)}%"></i></div></div>`;
@@ -402,8 +426,18 @@ function statRow(label, v) {
 function selectCar(id) {
   state.carId = id;
   for (const el of carList.children) el.classList.toggle("selected", el.dataset.id === id);
+  slideStrip();
   setShowcaseCar(getCar(id));
 }
+
+/** Translate the card strip so the selected card sits at the screen's centre. */
+function slideStrip() {
+  const sel = carList.querySelector(".car-card.selected");
+  if (!sel) return;
+  const centre = sel.offsetLeft + sel.offsetWidth / 2;
+  carList.style.transform = `translateX(${Math.round(carList.clientWidth / 2 - centre)}px)`;
+}
+window.addEventListener("resize", slideStrip);
 
 document.getElementById("btn-race").addEventListener("click", () => goTo("race"));
 document.getElementById("btn-signout").addEventListener("click", async () => {
@@ -942,7 +976,9 @@ function frame() {
     camera.fov = 45;
     camera.updateProjectionMatrix();
     camera.position.set(Math.sin(t * 0.12) * 2.5, 2.6 + Math.sin(t * 0.3) * 0.3, 8.5);
-    camera.lookAt(0, 0.7, 0);
+    // On car-select the card strip owns the bottom of the screen, so aim lower to
+    // lift the hero car up into the clear middle.
+    camera.lookAt(0, state.screen === "select" ? -0.35 : 0.7, 0);
     renderer.render(showcaseScene, camera);
   }
   requestAnimationFrame(frame);
