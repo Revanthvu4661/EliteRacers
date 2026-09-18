@@ -170,6 +170,14 @@ export function setHudHealth(pct) {
   fill.style.filter = clamped < 30 ? "saturate(1.3) brightness(1.15)" : "none";
 }
 
+/** Reusable HUD banner (RESPAWNING / RECONNECTING / ...). Empty string hides it. */
+export function setHudBanner(text) {
+  const el = $("#hud-banner");
+  const t = text || "";
+  if (el.textContent !== t) el.textContent = t;
+  if (el.hidden !== !t) el.hidden = !t;
+}
+
 export function setHudCamera(mode) {
   $("#hud-cam").textContent = mode.toUpperCase();
 }

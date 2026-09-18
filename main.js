@@ -11,18 +11,18 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=19";
-import * as ui from "./ui.js?v=19";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=19";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=19";
-import { buildTrack, TRACK_CONFIG } from "./track.js?v=19";
-import { createCameraRig } from "./camera.js?v=19";
-import { loadCarModel, assembleStatic, preloadCarAssets } from "./car-model.js?v=19";
-import { commentate } from "./ai-commentary.js?v=19";
-import * as mp from "./multiplayer.js?v=19";
-import { createPickups } from "./pickups.js?v=19";
-import { createMinimap } from "./minimap.js?v=19";
-import { createSpeedometer } from "./speedometer.js?v=19";
+import * as auth from "./auth.js?v=20";
+import * as ui from "./ui.js?v=20";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=20";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=20";
+import { buildTrack, TRACK_CONFIG } from "./track.js?v=20";
+import { createCameraRig } from "./camera.js?v=20";
+import { loadCarModel, assembleStatic, preloadCarAssets } from "./car-model.js?v=20";
+import { commentate } from "./ai-commentary.js?v=20";
+import * as mp from "./multiplayer.js?v=20";
+import { createPickups } from "./pickups.js?v=20";
+import { createMinimap } from "./minimap.js?v=20";
+import { createSpeedometer } from "./speedometer.js?v=20";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera
@@ -667,6 +667,8 @@ function teardownRace() {
   if (r.rig) raceScene.remove(r.rig.root);
   if (r.pickups) r.pickups.dispose();
   try { if (r.speedo) r.speedo.destroy(); } catch (_) { /* visual only */ }
+  hudBanner.reconnecting = false; hudBanner.respawnUntil = 0; hudBanner.wrongWay = null;
+  refreshBanner();
   state.race = null;
 }
 
@@ -724,6 +726,23 @@ function onCollide(impact) {
   }
   if (impact > 6) commentate("crash").then((line) => line && ui.showCommentary(line));
 }
+
+// HUD banner state (Task 4) - one banner, resolved by priority every race tick.
+const BANNER_RESPAWN_MS = 1200;
+const hudBanner = { reconnecting: false, respawnUntil: 0, wrongWay: null };
+function refreshBanner() {
+  try {
+    let text = "";
+    if (hudBanner.reconnecting) text = "RECONNECTING";
+    else if (performance.now() < hudBanner.respawnUntil) text = "RESPAWNING";
+    else if (hudBanner.wrongWay != null) text = `WRONG WAY  ${hudBanner.wrongWay}`;
+    ui.setHudBanner(text);
+  } catch (_) { /* HUD only - never let it touch the race */ }
+}
+mp.onConnectionChange((connected) => {
+  hudBanner.reconnecting = !connected && state.screen === "race" && !!state.race?.online;
+  refreshBanner();
+});
 
 function resetCar() {
   const r = state.race;
@@ -877,10 +896,13 @@ function updateRace(dt) {
   if (r.pendingRespawn) {
     r.pendingRespawn = false;
     resetCar();
+    hudBanner.respawnUntil = performance.now() + BANNER_RESPAWN_MS;
     r.health = HEALTH_RESPAWN_PCT;
     ui.setHudHealth(r.health);
     ui.toast("Car totaled - back on track, partially repaired.", "warn", 2200);
   }
+
+  refreshBanner();
 
   // Minimap (Task 3): local player only for now - see minimap.js. Heading uses
   // the same atan2(-fwd.z, fwd.x) convention track.js's own samples use.
@@ -988,7 +1010,7 @@ function frame() {
 // Boot
 // ---------------------------------------------------------------------------
 // Dev handle for the console / automated checks (harmless in the demo).
-window.ER = { state, cameraRig, TUNING, keys, camera, THREE, mp, remotes, computeLeaderboard, computeResultsBoard, updateRace };
+window.ER = { state, cameraRig, TUNING, keys, camera, THREE, mp, remotes, computeLeaderboard, computeResultsBoard, updateRace, hudBanner };
 
 preloadCarAssets();
 setShowcaseCar(getCar(state.carId));

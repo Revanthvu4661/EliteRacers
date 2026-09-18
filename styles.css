@@ -247,6 +247,16 @@ kbd {
 .hud-center.pop { animation: pop 500ms cubic-bezier(.2,.9,.3,1.2); }
 @keyframes pop { from { transform: translate(-50%, -50%) scale(1.8); opacity: 0; } to { transform: translate(-50%, -50%) scale(1); opacity: 1; } }
 .hud-quit { position: absolute; top: 20px; right: 24px; background: rgba(0,0,0,0.45); }
+/* Status banner - sits under the countdown/GO text, above the commentary. */
+.hud-banner {
+  top: 62%; left: 50%; transform: translateX(-50%);
+  padding: 10px 26px; border-radius: 10px;
+  font-size: 26px; font-weight: 700; letter-spacing: 5px; color: var(--accent-2);
+  background: rgba(7,8,12,0.7); border: 1px solid rgba(255,184,0,0.45);
+  animation: banner-pulse 900ms ease-in-out infinite alternate;
+}
+.hud-banner[hidden] { display: none; }
+@keyframes banner-pulse { from { opacity: 0.75; } to { opacity: 1; } }
 
 /* Multiplayer live standings - minimal, no styling polish needed. */
 .hud-leaderboard {

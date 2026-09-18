@@ -31,7 +31,7 @@
 // failure surfaces as a message so the UI can offer solo play instead.
 // ============================================================================
 
-import { getFirebaseApp, ensureFirebaseUid } from "./auth.js?v=19";
+import { getFirebaseApp, ensureFirebaseUid } from "./auth.js?v=20";
 
 const SDK_URL = "https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js";
 
@@ -52,6 +52,12 @@ let uid = null;
 let serverOffset = 0;      // server time = Date.now() + serverOffset
 let room = null;           // { code, roomRef, playerRef, unsubscribe, view }
 let roomListener = () => {};
+let connectionListener = () => {}; // fn(connected: bool) - fed by .info/connected (HUD "RECONNECTING" banner)
+
+/** Subscribe to Firebase's own socket state. Fires only once online play has been used. */
+export function onConnectionChange(fn) {
+  connectionListener = fn;
+}
 
 // ---------------------------------------------------------------------------
 
@@ -101,6 +107,8 @@ async function connect() {
     fb = await withTimeout(import(SDK_URL), CONNECT_TIMEOUT_MS, "Couldn't load the multiplayer service. Check your connection.");
     db = fb.getDatabase(app);
     fb.onValue(fb.ref(db, ".info/serverTimeOffset"), (s) => { serverOffset = s.val() || 0; });
+    // Persistent (never unsubscribed) so main.js can show/clear a reconnect banner mid-race.
+    fb.onValue(fb.ref(db, ".info/connected"), (s) => { try { connectionListener(s.val() === true); } catch (_) { /* UI only */ } });
   }
 
   // .info/connected fires false first, then true once the socket is up.
