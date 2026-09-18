@@ -250,6 +250,38 @@ kbd {
 .lb-rank { width: 1.2em; text-align: right; opacity: 0.8; }
 .lb-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Minimap - top-left, below the lap/time block so it never overlaps it. */
+.minimap {
+  top: 140px; left: 26px;
+  width: 150px; height: 150px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-border);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+
+/* Health/damage meter - right side, mirrors the minimap's vertical position (not
+   the leaderboard's - that already owns the top-right corner in multiplayer races).
+   Distinct red/orange gradient + "HP" label so it's never mistaken for the boost
+   toast or any NOS-style meter. */
+.health-hud { top: 140px; right: 26px; text-align: right; }
+.health-label {
+  font-family: var(--font-display); font-size: 13px; letter-spacing: 2px;
+  color: #ff8a5c; margin-bottom: 6px;
+}
+.health-bar {
+  width: 150px; height: 14px; margin-left: auto;
+  border-radius: 7px; overflow: hidden;
+  background: rgba(255,255,255,0.08); border: 1px solid var(--panel-border);
+}
+.health-fill {
+  height: 100%; width: 100%;
+  /* Gradient itself doesn't move - the fill's WIDTH shrinking reveals more of the
+     red end first, so the visible colour skews redder as health drops (main.js
+     also sets a CSS var for extra intensity at low health - see setHudHealth). */
+  background: linear-gradient(90deg, #ff3b3b, #ffb800);
+  transition: width 200ms ease, filter 200ms ease;
+}
+
 /* ---------- Loading overlay ---------- */
 #loading-overlay {
   position: fixed; inset: 0; z-index: 40;

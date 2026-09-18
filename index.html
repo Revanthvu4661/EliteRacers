@@ -7,7 +7,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏎️</text></svg>" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=11" />
+  <link rel="stylesheet" href="styles.css?v=16" />
 
   <!-- Import map: every module imports "three", "three/addons/..." and "cannon-es"
        by bare name. Change versions here, nowhere else. No build step. -->
@@ -126,6 +126,13 @@
       <div class="hud-center" id="hud-center"></div>
       <!-- Multiplayer only: live standings, populated by main.js's computeLeaderboard(). -->
       <div class="hud-leaderboard" id="hud-leaderboard" hidden></div>
+      <!-- Track overview - local player marker (+ remote markers once wired). -->
+      <canvas id="minimap" class="minimap"></canvas>
+      <!-- Health/damage meter - visual only, local per car (see main.js's onCollide). -->
+      <div class="health-hud">
+        <div class="health-label">HP <span id="hud-health-pct">100%</span></div>
+        <div class="health-bar"><div class="health-fill" id="hud-health-fill"></div></div>
+      </div>
     </div>
     <button id="btn-quit" class="btn btn-small btn-ghost hud-quit">Quit</button>
   </section>
@@ -157,6 +164,6 @@
   <!-- Toasts (errors, notices) -->
   <div id="toast-root"></div>
 
-  <script type="module" src="main.js?v=11"></script>
+  <script type="module" src="main.js?v=16"></script>
 </body>
 </html>

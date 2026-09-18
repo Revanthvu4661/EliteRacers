@@ -76,6 +76,25 @@ import * as CANNON from "cannon-es";
 
 const lerp = (a, b, t) => a + (b - a) * t;
 
+// ---------------------------------------------------------------------------
+// Barrier-hit reaction (additive - kept separate from TUNING above so that
+// object's diff stays exactly zero; nothing here changes any already-tuned
+// constant or the wheel-sync/postStep code path). Hooks into the EXISTING
+// chassisBody "collide" listener below (already there, already used for
+// camera shake/commentary) rather than adding a second collision-detection
+// path, and applies its steering effect as a single guarded multiplier
+// (=== 1, a no-op, whenever no recent hard hit occurred) on the existing
+// per-frame steering-target line in update() below, rather than a parallel,
+// separately-timed system.
+// ---------------------------------------------------------------------------
+const IMPACT_HARD_THRESHOLD = 6;        // m/s impact velocity - matches the existing
+                                         // "crash" commentary cutoff in main.js's
+                                         // onCollide, so "hard enough to comment on"
+                                         // and "hard enough to physically react to" agree.
+const IMPACT_SPEED_CUT = 0.45;          // fraction of speed removed on a hard hit (40-50%)
+const IMPACT_RECOVER_MS = 500;          // how long steering stays sluggish afterward
+const IMPACT_MIN_STEER_RESPONSE = 0.3;  // never fully dead - "recovering", not locked out
+
 /** Create the physics world (ground + track colliders are added by track.js). */
 export function createWorld() {
   const world = new CANNON.World({ gravity: new CANNON.Vec3(0, TUNING.GRAVITY, 0) });
@@ -148,14 +167,23 @@ export function createVehicle(world, carConfig, layout, onCollide = () => {}) {
   chassisBody.addEventListener("collide", (e) => {
     const v = Math.abs(e.contact.getImpactVelocityAlongNormal());
     if (v > 2.5) onCollide(v);
+    // Barrier-hit reaction (additive - the line above is untouched). A real
+    // hit knocks off speed and leaves steering mushy for a beat; light scrapes
+    // (below the threshold) don't trigger it at all.
+    if (v > IMPACT_HARD_THRESHOLD) {
+      chassisBody.velocity.scale(1 - IMPACT_SPEED_CUT, chassisBody.velocity);
+      impactRecoverUntil = performance.now() + IMPACT_RECOVER_MS;
+    }
   });
 
   // --- runtime state ---------------------------------------------------------
   let steer = 0;
   let surfaceGrip = 1;
   let handbrakeHeld = false;
+  let impactRecoverUntil = 0; // performance.now() timestamp; see IMPACT_* above
   const fwdWorld = new CANNON.Vec3();
   const tmp = new CANNON.Vec3();
+  let boostForce = 0; // N, continuous forward force while a pickup boost is active (Task 1)
 
   function forwardSpeed() {
     chassisBody.quaternion.vmult(new CANNON.Vec3(1, 0, 0), fwdWorld);
@@ -178,7 +206,12 @@ export function createVehicle(world, carConfig, layout, onCollide = () => {}) {
     // the reduced rear grip that spins the car, not more front steer. Cutting
     // the lock keeps the drift from carrying so far sideways on a held input.
     const steerCut = TUNING.HIGH_SPEED_STEER_CUT * speedRatio + (input.handbrake ? TUNING.DRIFT_STEER_CUT : 0);
-    const target = input.steer * maxSteer * (1 - Math.min(0.85, steerCut));
+    // Barrier-hit steering recovery (additive multiplier, === 1 - a complete no-op -
+    // whenever no recent hard impact occurred; see IMPACT_* above). Mushy, not dead,
+    // per IMPACT_MIN_STEER_RESPONSE, and ramps back to 1 over IMPACT_RECOVER_MS.
+    const impactT = Math.max(0, Math.min(1, (impactRecoverUntil - performance.now()) / IMPACT_RECOVER_MS));
+    const steerResponse = impactT > 0 ? lerp(1, IMPACT_MIN_STEER_RESPONSE, impactT) : 1;
+    const target = input.steer * maxSteer * (1 - Math.min(0.85, steerCut)) * steerResponse;
     steer += (target - steer) * (1 - Math.exp(-TUNING.STEER_SPEED * dt));
     // Steering is applied to the front wheel indices only (0 = fl, 1 = fr, matching
     // layout.wheels' order in car-model.js/main.js). Rear indices 2/3 are never
@@ -264,6 +297,17 @@ export function createVehicle(world, carConfig, layout, onCollide = () => {}) {
       upWorld.x * TUNING.UPRIGHT_TORQUE * m - av.z * TUNING.UPRIGHT_DAMPING * m
     );
     chassisBody.applyTorque(torque);
+
+    // Boost pickup (Task 1, additive) - applied here rather than in update() so it's
+    // correctly re-applied every physics substep, same reason the downforce above has
+    // to be: cannon clears applied forces after each substep, so anything applied once
+    // per rendered frame (update() runs once per frame, before stepWorld()) would only
+    // ever hit the first substep. Set via the new setBoost() below; a fully separate
+    // force from the engine-force pipeline in update(), so pickups can't touch it.
+    if (boostForce !== 0) {
+      chassisBody.quaternion.vmult(new CANNON.Vec3(1, 0, 0), fwdWorld);
+      chassisBody.applyForce(fwdWorld.scale(boostForce, tmp));
+    }
   }
   world.addEventListener("preStep", preStep);
 
@@ -318,6 +362,7 @@ export function createVehicle(world, carConfig, layout, onCollide = () => {}) {
     forwardSpeed,
     speedKmh: () => chassisBody.velocity.length() * 3.6,
     setSurfaceGrip: (g) => { surfaceGrip = g; },
+    setBoost: (forceN) => { boostForce = forceN; }, // Task 1 (additive) - 0 = no-op
     wheelLocalPosition,
     wheelInfo,
     isUpsideDown: () => { chassisBody.quaternion.vmult(new CANNON.Vec3(0, 1, 0), tmp); return tmp.y < 0.2; },

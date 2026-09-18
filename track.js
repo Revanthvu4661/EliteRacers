@@ -51,6 +51,18 @@ export const TRACK_POINTS = [
   [-15, -160], [-100, -140], [-150, -70], [-135, 10], [-105, 32],
 ].map(([x, z]) => [x * SCALE, z * SCALE]);
 
+// Boost pickup spawn points (Task 1): fixed fractions around the loop (u, same
+// convention as sampleAt/checkpoints), picked once here rather than randomised per
+// frame. Deliberately offset from the checkpoint gates (0, 0.25, 0.5, 0.75) and the
+// start/finish grandstand so they don't visually crowd either. Positions are resolved
+// to world space by the caller via the built track's own sampleAt(u), not here - this
+// module only owns the fixed layout data, same split as TRACK_POINTS/TRACK_CONFIG above.
+export const PICKUP_SPAWN_U = [0.08, 0.18, 0.36, 0.58, 0.7, 0.88];
+
+// Repair pickup spawn points (health revision): fewer and spaced apart from both
+// the boost spawns above and the checkpoint gates, same fixed-list convention.
+export const REPAIR_SPAWN_U = [0.13, 0.47, 0.81];
+
 const Y_UP = new THREE.Vector3(0, 1, 0);
 
 // ---------------------------------------------------------------------------

@@ -11,15 +11,17 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=11";
-import * as ui from "./ui.js?v=11";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=11";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=11";
-import { buildTrack, TRACK_CONFIG } from "./track.js?v=11";
-import { createCameraRig } from "./camera.js?v=11";
-import { loadCarModel, assembleStatic, preloadCarAssets } from "./car-model.js?v=11";
-import { commentate } from "./ai-commentary.js?v=11";
-import * as mp from "./multiplayer.js?v=11";
+import * as auth from "./auth.js?v=16";
+import * as ui from "./ui.js?v=16";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=16";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=16";
+import { buildTrack, TRACK_CONFIG } from "./track.js?v=16";
+import { createCameraRig } from "./camera.js?v=16";
+import { loadCarModel, assembleStatic, preloadCarAssets } from "./car-model.js?v=16";
+import { commentate } from "./ai-commentary.js?v=16";
+import * as mp from "./multiplayer.js?v=16";
+import { createPickups } from "./pickups.js?v=16";
+import { createMinimap } from "./minimap.js?v=16";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera
@@ -547,6 +549,7 @@ document.getElementById("btn-change-car").addEventListener("click", () => goTo("
 const COUNTDOWN_S = 3.4;
 const _v = new THREE.Vector3();
 const _rel = new THREE.Vector3();
+const _fwd = new THREE.Vector3();
 
 async function startRace() {
   teardownRace();
@@ -574,6 +577,12 @@ async function startRace() {
   const pose = t.startPose(7);
   veh.reset(pose.position, pose.yaw);
 
+  // Recreated per race (like the car rig above) so pickup availability always
+  // starts fresh; disposed in teardownRace(). Solo-only for now - see
+  // pickups.js's file header for why multiplayer sync isn't wired yet.
+  const pickups = createPickups(raceScene, t);
+  const minimap = createMinimap(document.getElementById("minimap"), t);
+
   state.race = {
     ready: true,
     online,
@@ -585,10 +594,13 @@ async function startRace() {
     lap: 1,
     nextCp: 1,
     cpSide: t.checkpoints.map(() => 0),
-    veh, rig, track: t, carCfg,
+    veh, rig, track: t, carCfg, pickups, minimap,
     upsideDownFor: 0,
     lastDriftLineAt: 0,
+    health: HEALTH_MAX,
+    pendingRespawn: false,
   };
+  ui.setHudHealth(HEALTH_MAX);
   if (online) { ui.renderLeaderboard(computeLeaderboard(mp.getRoom())); }
   syncChassisVisual();
   syncWheelVisuals();
@@ -615,6 +627,7 @@ function teardownRace() {
   world.removeEventListener("postStep", syncWheelVisuals);
   if (r.veh) r.veh.dispose();
   if (r.rig) raceScene.remove(r.rig.root);
+  if (r.pickups) r.pickups.dispose();
   state.race = null;
 }
 
@@ -633,10 +646,40 @@ function finishRace() {
   goTo("results");
 }
 
+// Health/damage meter (visual only - no game-ending effect). Reuses onCollide's
+// own impact value below - the SAME velocity-delta this function already gets
+// for shake/commentary - rather than a second detection path. "Hard" here is
+// deliberately the same 6 m/s cutoff already used for the crash commentary line
+// two lines down, and matches physics.js's own IMPACT_HARD_THRESHOLD (the speed-
+// cut/steering-recovery trigger), so all four hard-hit effects agree on what
+// counts as "hard".
+const HEALTH_MAX = 100;
+const HEALTH_DAMAGE_HARD_THRESHOLD = 6;   // m/s - see comment above
+const HEALTH_DAMAGE_SCALE = 1.8;          // % health per m/s of impact above the threshold
+const HEALTH_MIN_DAMAGE_PER_HIT = 3;      // even a just-over-threshold hit costs a little
+const HEALTH_MAX_DAMAGE_PER_HIT = 30;     // cap so one single hit can't gut the bar
+const HEALTH_REGEN_PER_SEC = 0;           // 0 = no regen (default). A single isolated
+                                           // constant - change this alone for slow
+                                           // passive regen, nothing else to touch.
+const HEALTH_RESPAWN_PCT = 50;            // health after a 0%-HP respawn - enough to not
+                                           // get immediately re-totaled, but repair
+                                           // pickups still matter to get back to full.
+
 function onCollide(impact) {
   const r = state.race;
   if (!r || !r.ready) return;
   cameraRig.shake(Math.min(1, impact / 12));
+  if (impact > HEALTH_DAMAGE_HARD_THRESHOLD) {
+    const damage = Math.min(HEALTH_MAX_DAMAGE_PER_HIT,
+      Math.max(HEALTH_MIN_DAMAGE_PER_HIT, (impact - HEALTH_DAMAGE_HARD_THRESHOLD) * HEALTH_DAMAGE_SCALE));
+    r.health = Math.max(0, r.health - damage);
+    ui.setHudHealth(r.health);
+    // Actual respawn happens back in updateRace(), between physics steps - not
+    // here, mid-collision-resolution (same reasoning as the existing upsideDown/
+    // stranded recovery, which is also deferred to the main loop rather than
+    // triggered from inside a physics callback).
+    if (r.health <= 0 && !r.pendingRespawn) r.pendingRespawn = true;
+  }
   if (impact > 6) commentate("crash").then((line) => line && ui.showCommentary(line));
 }
 
@@ -761,6 +804,45 @@ function updateRace(dt) {
     });
   }
   tickRemotes();
+
+  // Pickups (boost + repair, solo-only for now - see pickups.js). Fed the resolved
+  // end-of-frame chassis position, same as everything else below this point.
+  const pk = r.pickups.update(dt, body.position);
+  r.veh.setBoost(pk.boosted ? r.pickups.BOOST_FORCE_N : 0);
+  for (const c of pk.collected) {
+    if (c.kind === "boost") {
+      ui.toast("BOOST!", "ok", 1000);
+    } else if (c.kind === "repair") {
+      r.health = Math.min(HEALTH_MAX, r.health + r.pickups.REPAIR_AMOUNT);
+      ui.setHudHealth(r.health);
+      ui.toast("REPAIRED!", "ok", 1000);
+    }
+  }
+
+  // Health regen (off by default - HEALTH_REGEN_PER_SEC above is the one constant
+  // to change). A no-op at 0, so this line is inert until that constant is touched.
+  if (HEALTH_REGEN_PER_SEC > 0 && r.health < HEALTH_MAX) {
+    r.health = Math.min(HEALTH_MAX, r.health + HEALTH_REGEN_PER_SEC * dt);
+    ui.setHudHealth(r.health);
+  }
+
+  // Respawn at 0% HP (deferred from onCollide, which can't safely reposition the
+  // chassis mid-collision-resolution - flips the flag only, same pattern as the
+  // existing upsideDown/stranded recovery just above, kept as its own separate
+  // check rather than folded into that chain so it can't interact with already-
+  // debugged logic there).
+  if (r.pendingRespawn) {
+    r.pendingRespawn = false;
+    resetCar();
+    r.health = HEALTH_RESPAWN_PCT;
+    ui.setHudHealth(r.health);
+    ui.toast("Car totaled - back on track, partially repaired.", "warn", 2200);
+  }
+
+  // Minimap (Task 3): local player only for now - see minimap.js. Heading uses
+  // the same atan2(-fwd.z, fwd.x) convention track.js's own samples use.
+  _fwd.set(1, 0, 0).applyQuaternion(r.rig.root.quaternion);
+  r.minimap.update(body.position, Math.atan2(-_fwd.z, _fwd.x));
 
   // Drift commentary
   if (r.phase === "racing" && input.handbrake && kmh > 45 && now - r.lastDriftLineAt > 9000) {

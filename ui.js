@@ -159,6 +159,17 @@ export function setHudSpeed(kmh) {
   $("#hud-speed").textContent = Math.round(kmh);
 }
 
+/** Health/damage meter. pct: 0-100 (caller clamps; this clamps again defensively
+ *  so a bad input can never render a negative width or break the layout). */
+export function setHudHealth(pct) {
+  const clamped = Math.max(0, Math.min(100, pct));
+  $("#hud-health-pct").textContent = `${Math.round(clamped)}%`;
+  const fill = $("#hud-health-fill");
+  fill.style.width = `${clamped}%`;
+  // Low health reads as more urgent: a touch brighter/more saturated, not a new colour.
+  fill.style.filter = clamped < 30 ? "saturate(1.3) brightness(1.15)" : "none";
+}
+
 export function setHudCamera(mode) {
   $("#hud-cam").textContent = mode.toUpperCase();
 }
