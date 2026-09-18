@@ -11,17 +11,17 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=16";
-import * as ui from "./ui.js?v=16";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=16";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=16";
-import { buildTrack, TRACK_CONFIG } from "./track.js?v=16";
-import { createCameraRig } from "./camera.js?v=16";
-import { loadCarModel, assembleStatic, preloadCarAssets } from "./car-model.js?v=16";
-import { commentate } from "./ai-commentary.js?v=16";
-import * as mp from "./multiplayer.js?v=16";
-import { createPickups } from "./pickups.js?v=16";
-import { createMinimap } from "./minimap.js?v=16";
+import * as auth from "./auth.js?v=17";
+import * as ui from "./ui.js?v=17";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=17";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=17";
+import { buildTrack, TRACK_CONFIG } from "./track.js?v=17";
+import { createCameraRig } from "./camera.js?v=17";
+import { loadCarModel, assembleStatic, preloadCarAssets } from "./car-model.js?v=17";
+import { commentate } from "./ai-commentary.js?v=17";
+import * as mp from "./multiplayer.js?v=17";
+import { createPickups } from "./pickups.js?v=17";
+import { createMinimap } from "./minimap.js?v=17";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera
@@ -673,6 +673,9 @@ function onCollide(impact) {
     const damage = Math.min(HEALTH_MAX_DAMAGE_PER_HIT,
       Math.max(HEALTH_MIN_DAMAGE_PER_HIT, (impact - HEALTH_DAMAGE_HARD_THRESHOLD) * HEALTH_DAMAGE_SCALE));
     r.health = Math.max(0, r.health - damage);
+    // Damage is fractional, so health could land on e.g. 0.4: the HUD rounds that to
+    // "0%" but the `<= 0` respawn check below never fired. Anything under 1% is 0.
+    if (r.health < 1) r.health = 0;
     ui.setHudHealth(r.health);
     // Actual respawn happens back in updateRace(), between physics steps - not
     // here, mid-collision-resolution (same reasoning as the existing upsideDown/
@@ -943,7 +946,7 @@ function frame() {
 // Boot
 // ---------------------------------------------------------------------------
 // Dev handle for the console / automated checks (harmless in the demo).
-window.ER = { state, cameraRig, TUNING, keys, camera, THREE, mp, remotes, computeLeaderboard, computeResultsBoard };
+window.ER = { state, cameraRig, TUNING, keys, camera, THREE, mp, remotes, computeLeaderboard, computeResultsBoard, updateRace };
 
 preloadCarAssets();
 setShowcaseCar(getCar(state.carId));
