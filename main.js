@@ -11,15 +11,15 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=10";
-import * as ui from "./ui.js?v=10";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=10";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=10";
-import { buildTrack, TRACK_CONFIG } from "./track.js?v=10";
-import { createCameraRig } from "./camera.js?v=10";
-import { loadCarModel, assembleStatic, preloadCarAssets } from "./car-model.js?v=10";
-import { commentate } from "./ai-commentary.js?v=10";
-import * as mp from "./multiplayer.js?v=10";
+import * as auth from "./auth.js?v=11";
+import * as ui from "./ui.js?v=11";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=11";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=11";
+import { buildTrack, TRACK_CONFIG } from "./track.js?v=11";
+import { createCameraRig } from "./camera.js?v=11";
+import { loadCarModel, assembleStatic, preloadCarAssets } from "./car-model.js?v=11";
+import { commentate } from "./ai-commentary.js?v=11";
+import * as mp from "./multiplayer.js?v=11";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera

@@ -29,6 +29,18 @@ const DEFAULT_MODEL_URL = "./assets/models/ferrari.glb";
 const DRACO_PATH = "./assets/libs/draco/"; // decoder shipped locally: no CDN needed at demo time
 const LOAD_TIMEOUT_MS = 8000;
 
+// Purely cosmetic size bump - the car looked small relative to the track/other cars.
+// Applied to the returned `body` group and to each wheel's own mesh scale, AFTER
+// `radius`/`position`/`quaternion` are captured below - those three numbers are what
+// main.js's buildCarRig() turns into the chassis collision box and wheel-raycast
+// layout (physics.js), so they're read at their original, unscaled values and never
+// touched here. That deliberately means the locally-driven car's own wheel STANCE
+// (not size) stays exactly where physics already has it tuned - only assembleStatic()
+// (menu car, results preview, remote multiplayer puppets - none of them physics-driven)
+// also widens the wheel POSITION to match, since nothing there is fighting a tuned
+// collision box. See car-model.js's assembleStatic() for that half of the fix.
+const VISUAL_SCALE = 1.4;
+
 const gltfCache = new Map(); // url -> Promise<gltf.scene>
 
 function loadGltfOnce(url) {
@@ -111,9 +123,13 @@ function instantiateGltf(template, carConfig) {
 
   // Wheels become independent so physics can drive them; body keeps the rest.
   wheels.forEach((w) => w.node.removeFromParent());
+  // Visual-only size bump (see VISUAL_SCALE above) - radius/position were already
+  // captured from the unscaled geometry, so this doesn't touch anything physics reads.
+  wheels.forEach((w) => w.node.scale.setScalar(VISUAL_SCALE));
 
   const body = new THREE.Group();
   body.name = "car-body";
+  body.scale.setScalar(VISUAL_SCALE);
   body.add(root);
   return { body, wheels, source: "gltf" };
 }
@@ -237,17 +253,35 @@ export function buildCarModel(colorHex = 0xff3b3b) {
     };
   });
 
+  // Visual-only size bump, same treatment as the GLTF path above: wheels[i].position/
+  // .radius are left exactly as defined (R, the layout[] coordinates) so physics.js's
+  // chassis box and wheel-raycast placement don't move; only the rendered meshes grow.
+  body.scale.setScalar(VISUAL_SCALE);
+  wheels.forEach((w) => w.node.scale.setScalar(VISUAL_SCALE));
+
   return { body, wheels, source: "primitive" };
 }
 
 // ---------------------------------------------------------------------------
 
-/** Wheels attached at rest: for the showcase / car-select preview. */
+/**
+ * Wheels attached at rest: for the showcase / car-select preview, and for
+ * multiplayer's remote-player puppets (main.js) - anything that isn't the
+ * locally-driven car, which instead gets its wheel positions from physics every
+ * frame (see main.js's buildCarRig/syncWheelVisuals) and is deliberately left
+ * alone by VISUAL_SCALE (see the comment on it above).
+ *
+ * w.position is the wheel's ORIGINAL (pre-VISUAL_SCALE) offset - main.js's physics
+ * layout reads that same field directly and must keep seeing the unscaled value, so
+ * it's scaled only in this copy, not on the shared model.wheels object. Without this,
+ * the now-bigger wheel mesh (VISUAL_SCALE'd above) would sit at its old, closer-to-
+ * centre offset and visibly float inboard of the bigger body's fenders.
+ */
 export function assembleStatic(model) {
   const g = new THREE.Group();
   g.add(model.body);
   for (const w of model.wheels) {
-    w.node.position.copy(w.position);
+    w.node.position.copy(w.position).multiplyScalar(VISUAL_SCALE);
     w.node.quaternion.copy(w.quaternion);
     g.add(w.node);
   }
