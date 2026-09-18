@@ -29,7 +29,7 @@
 // ============================================================================
 
 import * as THREE from "three";
-import { PICKUP_SPAWN_U, REPAIR_SPAWN_U } from "./track.js?v=20";
+import { PICKUP_SPAWN_U, REPAIR_SPAWN_U } from "./track.js?v=21";
 
 const HOVER_HEIGHT = 1.3;       // m above the road
 const TRIGGER_RADIUS = 3.2;     // m, proximity trigger (generous - arcade feel)

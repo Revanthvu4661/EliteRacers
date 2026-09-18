@@ -11,18 +11,18 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=20";
-import * as ui from "./ui.js?v=20";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=20";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=20";
-import { buildTrack, TRACK_CONFIG } from "./track.js?v=20";
-import { createCameraRig } from "./camera.js?v=20";
-import { loadCarModel, assembleStatic, preloadCarAssets } from "./car-model.js?v=20";
-import { commentate } from "./ai-commentary.js?v=20";
-import * as mp from "./multiplayer.js?v=20";
-import { createPickups } from "./pickups.js?v=20";
-import { createMinimap } from "./minimap.js?v=20";
-import { createSpeedometer } from "./speedometer.js?v=20";
+import * as auth from "./auth.js?v=21";
+import * as ui from "./ui.js?v=21";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=21";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=21";
+import { buildTrack, TRACK_CONFIG } from "./track.js?v=21";
+import { createCameraRig } from "./camera.js?v=21";
+import { loadCarModel, assembleStatic, preloadCarAssets } from "./car-model.js?v=21";
+import { commentate } from "./ai-commentary.js?v=21";
+import * as mp from "./multiplayer.js?v=21";
+import { createPickups } from "./pickups.js?v=21";
+import { createMinimap } from "./minimap.js?v=21";
+import { createSpeedometer } from "./speedometer.js?v=21";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera
@@ -637,6 +637,7 @@ async function startRace() {
     lastDriftLineAt: 0,
     health: HEALTH_MAX,
     pendingRespawn: false,
+    wrongWayFor: 0,
   };
   ui.setHudHealth(HEALTH_MAX);
   if (online) { ui.renderLeaderboard(computeLeaderboard(mp.getRoom())); }
@@ -743,6 +744,31 @@ mp.onConnectionChange((connected) => {
   hudBanner.reconnecting = !connected && state.screen === "race" && !!state.race?.online;
   refreshBanner();
 });
+
+// Wrong-way detection (Task 5). Velocity (not heading) against the track tangent,
+// sustained past a grace period before the countdown even shows - a spin or drift
+// briefly reverses velocity for well under a second, so it never reaches the banner.
+// resetCar() keeps lap / nextCp / trackDistance untouched (it only moves the chassis
+// to the nearest centreline sample), so race position survives the reset.
+const WRONG_WAY_MIN_KMH = 15;
+const WRONG_WAY_GRACE_S = 1.5;
+const WRONG_WAY_COUNTDOWN_S = 10;
+function updateWrongWay(r, near, body, dt) {
+  if (r.phase !== "racing") { r.wrongWayFor = 0; hudBanner.wrongWay = null; return; }
+  const tan = near.sample.t;
+  const alongKmh = (body.velocity.x * tan.x + body.velocity.z * tan.z) * 3.6;
+  r.wrongWayFor = alongKmh < -WRONG_WAY_MIN_KMH ? (r.wrongWayFor || 0) + dt : 0;
+  const over = r.wrongWayFor - WRONG_WAY_GRACE_S;
+  if (over < 0) { hudBanner.wrongWay = null; return; }
+  if (over >= WRONG_WAY_COUNTDOWN_S) {
+    r.wrongWayFor = 0;
+    hudBanner.wrongWay = null;
+    resetCar();
+    ui.toast("Wrong way - reset to the track.", "warn", 1600);
+    return;
+  }
+  hudBanner.wrongWay = Math.ceil(WRONG_WAY_COUNTDOWN_S - over);
+}
 
 function resetCar() {
   const r = state.race;
@@ -902,6 +928,7 @@ function updateRace(dt) {
     ui.toast("Car totaled - back on track, partially repaired.", "warn", 2200);
   }
 
+  try { updateWrongWay(r, near, body, dt); } catch (_) { /* never let it break racing */ }
   refreshBanner();
 
   // Minimap (Task 3): local player only for now - see minimap.js. Heading uses
