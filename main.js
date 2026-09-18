@@ -11,18 +11,19 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=27";
-import * as ui from "./ui.js?v=27";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=27";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=27";
-import { buildTrack, TRACK_CONFIG } from "./track.js?v=27";
-import { createCameraRig } from "./camera.js?v=27";
-import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=27";
-import { commentate } from "./ai-commentary.js?v=27";
-import * as mp from "./multiplayer.js?v=27";
-import { createPickups } from "./pickups.js?v=27";
-import { createMinimap } from "./minimap.js?v=27";
-import { createSpeedometer } from "./speedometer.js?v=27";
+import * as auth from "./auth.js?v=28";
+import * as ui from "./ui.js?v=28";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=28";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=28";
+import { buildTrack, TRACK_CONFIG } from "./track.js?v=28";
+import { createCameraRig } from "./camera.js?v=28";
+import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=28";
+import { commentate } from "./ai-commentary.js?v=28";
+import * as mp from "./multiplayer.js?v=28";
+import { createPickups } from "./pickups.js?v=28";
+import { createMinimap } from "./minimap.js?v=28";
+import { createSpeedometer } from "./speedometer.js?v=28";
+import * as prog from "./progression.js?v=28";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera
@@ -436,8 +437,50 @@ function selectCar(id) {
   state.carId = id;
   for (const el of carList.children) el.classList.toggle("selected", el.dataset.id === id);
   slideStrip();
-  setShowcaseCar(getCar(id));
+  setShowcaseCar(skinnedCar(getCar(id)));
 }
+
+// ---------------------------------------------------------------------------
+// Progression (Tasks 8-10): XP/coins/skins live in progression.js (pure); this
+// is the only glue. Every entry point is try/catch-guarded so it can never break
+// racing, results or car select.
+// ---------------------------------------------------------------------------
+function progressUid() {
+  const p = state.player;
+  return p && !p.demo && p.uid ? p.uid : "demo";
+}
+/** The selected car with its equipped skin tint applied (same tint path as cars.js's color). */
+function skinnedCar(carCfg) {
+  try { return { ...carCfg, color: prog.skinColor(carCfg, prog.loadProgress(progressUid())) }; }
+  catch (_) { return carCfg; }
+}
+function refreshCoins() {
+  try { ui.setCoinBalance(prog.loadProgress(progressUid()).coins); } catch (_) { /* UI only */ }
+}
+
+const garageStatus = (msg, kind) => ui.setStatus("garage-status", msg, kind);
+function renderGarage() {
+  try {
+    const car = getCar(state.carId);
+    const p = prog.loadProgress(progressUid());
+    ui.setCoinBalance(p.coins);
+    const tintable = !(car.model && !car.paintMaterial);
+    if (!tintable) { ui.renderGarage(car.name, null); return; }
+    const equipped = prog.equippedSkinId(p, car.id);
+    const rows = prog.skinsFor(car.id).map((s) => ({
+      id: s.id, name: s.name, price: s.price,
+      colorHex: "#" + (s.color == null ? car.color : s.color).toString(16).padStart(6, "0"),
+      owned: prog.isOwned(p, car.id, s.id), equipped: s.id === equipped,
+    }));
+    ui.renderGarage(car.name, rows,
+      (id) => { const r = prog.buySkin(progressUid(), car.id, id); garageStatus(r.ok ? "Purchased!" : r.reason, r.ok ? "ok" : "err"); if (r.ok) ui.toast("Skin purchased", "ok", 1400); renderGarage(); },
+      (id) => { const r = prog.equipSkin(progressUid(), car.id, id); garageStatus(r.ok ? "Equipped" : r.reason, r.ok ? "ok" : "err"); renderGarage(); setShowcaseCar(skinnedCar(car)); });
+  } catch (err) {
+    console.warn("[garage]", err);
+  }
+}
+document.getElementById("btn-garage").addEventListener("click", () => { garageStatus(""); goTo("garage"); });
+document.getElementById("btn-garage-back").addEventListener("click", () => goTo("select"));
 
 /** Translate the card strip so the selected card sits at the screen's centre. */
 function slideStrip() {
@@ -606,7 +649,7 @@ async function startRace() {
   ui.setHudCamera(cameraRig.getMode());
 
   const t = ensureTrack();
-  const carCfg = getCar(state.carId);
+  const carCfg = skinnedCar(getCar(state.carId));
   ui.setLoading("Loading car...");
   // Never let a slow model download hold the start: fallback after REAL_MODEL_WAIT_MS,
   // and swap the real body in (wheels are baked into it, so hide the Ferrari's) later.
@@ -698,9 +741,36 @@ function finishRace() {
   const laps = r.lapTimes.slice();
   const online = r.online;
   const roomBeforeTeardown = online ? mp.getRoom() : null;
+  const finished = r.phase === "finished";
+  const healthLeft = r.health;
   teardownRace();
   state.lastRaceOnline = online;
   ui.renderResults(state.player, laps);
+  // Progression: the ONE place XP/coins are awarded. Only for a completed race.
+  let progressData = null;
+  if (finished) {
+    try {
+      let place = 1, players = 1;
+      if (online && roomBeforeTeardown) {
+        const board = computeResultsBoard(roomBeforeTeardown);
+        const idx = board.findIndex((e) => e.isMe);
+        players = roomBeforeTeardown.players.length || 1;
+        place = idx >= 0 ? idx + 1 : 0; // 0 => podium falls to 0 below
+      }
+      const xp = prog.raceXP({
+        finishMs: laps.reduce((a, b) => a + b, 0),
+        healthLeft,
+        place: place || 99, players: place ? players : 1,
+        parTimeMs: prog.parTimeMs(TRACK_CONFIG.laps, r.track.length),
+      });
+      progressData = { ...prog.applyRaceResult(progressUid(), xp), players: place ? players : 1 };
+      if (progressData.leveledUp) ui.toast(`Level up! You reached level ${progressData.level.lvl}`, "ok", 3200);
+    } catch (err) {
+      console.warn("[progression]", err);
+      progressData = null;
+    }
+  }
+  try { ui.renderProgress(progressData); } catch (_) { /* results must still show */ }
   // Populate immediately from the cached room (don't wait for the next network
   // event) - onRoomChange keeps it live-updating as stragglers finish after this.
   ui.renderMultiplayerBoard(online ? computeResultsBoard(roomBeforeTeardown) : null);
@@ -1024,7 +1094,8 @@ function goTo(screen) {
   if (mp.getRoom() && !wantsRoom) mp.leaveRoom();
   state.screen = ui.showScreen(screen);
   keys.clear();
-  if (screen === "select") renderCarCards();
+  if (screen === "select") { renderCarCards(); refreshCoins(); setShowcaseCar(skinnedCar(getCar(state.carId))); }
+  if (screen === "garage") renderGarage();
   if (screen === "race") startRace();
 }
 
@@ -1056,7 +1127,7 @@ function frame() {
 // Boot
 // ---------------------------------------------------------------------------
 // Dev handle for the console / automated checks (harmless in the demo).
-window.ER = { state, cameraRig, TUNING, keys, camera, THREE, mp, remotes, computeLeaderboard, computeResultsBoard, updateRace, hudBanner, showcase };
+window.ER = { state, cameraRig, TUNING, keys, camera, THREE, mp, remotes, computeLeaderboard, computeResultsBoard, updateRace, hudBanner, showcase, prog };
 
 preloadCarAssets();
 setShowcaseCar(getCar(state.carId));

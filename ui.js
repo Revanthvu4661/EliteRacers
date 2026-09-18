@@ -5,7 +5,7 @@
 
 const $ = (sel) => document.querySelector(sel);
 
-export const SCREENS = ["login", "select", "lobby", "race", "results"];
+export const SCREENS = ["login", "select", "lobby", "garage", "race", "results"];
 let activeScreen = "login";
 
 /** Cross-fade to a screen. Returns the screen name. */
@@ -285,6 +285,68 @@ export function renderMultiplayerBoard(entries) {
     li.append(rank, name, time);
     list.appendChild(li);
   });
+}
+
+// ---------------- Progression (Task 8/9/10) ----------------
+
+/** Results-screen XP block. data: { xp:{base,clean,podium,total}, coins, level:{lvl,into,need},
+ *  progress:{coins}, players } from main.js, or null to hide (quit / no laps). */
+export function renderProgress(data) {
+  const box = $("#results-xp");
+  if (!data) { box.hidden = true; return; }
+  box.hidden = false;
+  $("#xp-base").textContent = data.xp.base;
+  $("#xp-clean").textContent = data.xp.clean;
+  $("#xp-podium").textContent = data.xp.podium;
+  $("#xp-podium-row").hidden = !(data.players > 1);
+  $("#xp-total").textContent = data.xp.total;
+  $("#xp-level").textContent = data.level.lvl;
+  $("#xp-into").textContent = data.level.into;
+  $("#xp-need").textContent = data.level.need;
+  $("#xp-bar-fill").style.width = `${Math.round((100 * data.level.into) / data.level.need)}%`;
+  $("#xp-coins").textContent = data.coins;
+  $("#xp-balance").textContent = data.progress.coins;
+}
+
+export function setCoinBalance(coins) {
+  for (const el of document.querySelectorAll("#coin-balance, #garage-coins")) el.textContent = coins;
+}
+
+/**
+ * Garage skin list. rows: [{ id, name, price, colorHex, owned, equipped }]; null rows => "Stock only".
+ * onBuy(id) / onEquip(id) are wired by main.js; this only renders.
+ */
+export function renderGarage(carName, rows, onBuy, onEquip) {
+  $("#garage-car").textContent = carName;
+  const list = $("#skin-list");
+  list.innerHTML = "";
+  if (!rows) {
+    const li = document.createElement("li");
+    li.className = "stock-only";
+    li.textContent = "Stock only - this car keeps its own livery.";
+    list.appendChild(li);
+    return;
+  }
+  for (const r of rows) {
+    const li = document.createElement("li");
+    if (r.equipped) li.classList.add("equipped");
+    const sw = document.createElement("span");
+    sw.className = "skin-swatch";
+    sw.style.background = `linear-gradient(135deg, ${r.colorHex}, #000 160%)`;
+    const name = document.createElement("span");
+    name.className = "skin-name";
+    name.textContent = r.name;
+    const price = document.createElement("span");
+    price.className = "skin-price";
+    price.textContent = r.owned ? (r.price ? "Owned" : "Free") : `${r.price} coins`;
+    const btn = document.createElement("button");
+    btn.className = "btn " + (r.equipped ? "btn-ghost" : "btn-primary");
+    btn.textContent = r.equipped ? "Equipped" : (r.owned ? "Equip" : "Buy");
+    btn.disabled = r.equipped;
+    btn.addEventListener("click", () => (r.owned ? onEquip(r.id) : onBuy(r.id)));
+    li.append(sw, name, price, btn);
+    list.appendChild(li);
+  }
 }
 
 export function formatTime(ms) {

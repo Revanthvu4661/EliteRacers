@@ -7,7 +7,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏎️</text></svg>" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=27" />
+  <link rel="stylesheet" href="styles.css?v=28" />
 
   <!-- Import map: every module imports "three", "three/addons/..." and "cannon-es"
        by bare name. Change versions here, nowhere else. No build step. -->
@@ -55,6 +55,8 @@
     <header class="topbar">
       <span class="topbar-title">CHOOSE YOUR CAR</span>
       <span class="topbar-right">
+        <span id="coin-chip" class="chip coin-chip" title="Coins">&#9679; <span id="coin-balance">0</span></span>
+        <button id="btn-garage" class="btn btn-small btn-ghost">Garage</button>
         <span id="player-chip" class="chip"></span>
         <button id="btn-signout" class="btn btn-small btn-ghost">Sign out</button>
       </span>
@@ -65,6 +67,21 @@
       <button id="btn-race" class="btn btn-primary btn-wide">RACE SOLO</button>
       <button id="btn-multiplayer" class="btn btn-ghost btn-wide">MULTIPLAYER</button>
     </footer>
+  </section>
+
+  <!-- ============ SCREEN: GARAGE (skins = tints of the selected car) ============ -->
+  <section id="screen-garage" class="screen">
+    <header class="topbar">
+      <span class="topbar-title">GARAGE</span>
+      <span class="topbar-right"><span class="chip coin-chip">&#9679; <span id="garage-coins">0</span></span></span>
+    </header>
+    <div class="garage-card">
+      <p class="garage-car" id="garage-car"></p>
+      <p class="lobby-sub">Skins are paint tints. Bought skins stay yours; equip one to race in it.</p>
+      <ul class="skin-list" id="skin-list"></ul>
+      <p id="garage-status" class="status" aria-live="polite"></p>
+      <button id="btn-garage-back" class="btn btn-small btn-ghost lobby-back">Back to car select</button>
+    </div>
   </section>
 
   <!-- ============ SCREEN: MULTIPLAYER LOBBY ============ -->
@@ -153,6 +170,22 @@
         <p class="results-mp-head">RACE RESULTS</p>
         <ol class="results-mp-list" id="results-mp-list"></ol>
       </div>
+      <!-- Progression (progression.js): XP breakdown, level, coins. Hidden on quit / no laps. -->
+      <div class="results-xp" id="results-xp" hidden>
+        <p class="results-mp-head">XP EARNED</p>
+        <div class="xp-rows">
+          <div class="xp-row"><span>Speed</span><span id="xp-base">0</span></div>
+          <div class="xp-row"><span>Clean race</span><span id="xp-clean">0</span></div>
+          <div class="xp-row" id="xp-podium-row"><span>Podium</span><span id="xp-podium">0</span></div>
+          <div class="xp-row total"><span>Total</span><span>+<span id="xp-total">0</span> XP</span></div>
+        </div>
+        <div class="xp-level">
+          <span class="xp-lvl">LEVEL <span id="xp-level">1</span></span>
+          <div class="xp-bar"><i id="xp-bar-fill"></i></div>
+          <span class="xp-into"><span id="xp-into">0</span>/<span id="xp-need">100</span></span>
+        </div>
+        <p class="xp-coins">+<span id="xp-coins">0</span> coins &middot; balance <span id="xp-balance">0</span></p>
+      </div>
       <div class="results-actions">
         <button id="btn-again" class="btn btn-primary">Play Again</button>
         <button id="btn-change-car" class="btn btn-ghost">Change Car</button>
@@ -169,6 +202,6 @@
   <!-- Toasts (errors, notices) -->
   <div id="toast-root"></div>
 
-  <script type="module" src="main.js?v=27"></script>
+  <script type="module" src="main.js?v=28"></script>
 </body>
 </html>
