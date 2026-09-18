@@ -20,45 +20,41 @@ Then open http://localhost:8080 — hard refresh (Ctrl+Shift+R) after code edits
 
 ## Git status
 
-Everything through the barrier-hit/health/pickups/minimap work is **committed and
-pushed** to [github.com/Revanthvu4661/EliteRacers](https://github.com/Revanthvu4661/EliteRacers)
-`main` (`4b2bd2b`). Working tree is otherwise clean.
+All work through the 2026-09-19 session (Tasks 0-10 below) is **committed locally on
+`main`** with a tag per verified task: `ok-baseline`, `ok-task1` ... `ok-task10`
+(`git tag`). **Nothing from that session has been pushed** - the user pushes.
 
-There are, however, **loose untracked `.glb` files appearing in the project root
-across sessions**, not added by any Claude session — the user appears to be
-manually collecting candidate car models (outside these sessions, likely via a
-file browser or a site like Sketchfab). As of this handoff:
-`2013_ferrari_458_spider.glb`, `2022_lamborghini_huracan_super_trofeo_evo2_carb.glb`,
-`bugatti_eb110_super_sport_1992_by_alex.ka..glb`. (Two folder-form versions of the
-Ferrari and a Mustang seen in an earlier session are gone now — presumably cleaned
-up/replaced by the loose GLB exports above.) **None of these are wired into
-`cars.js`** and `car-model.js` doesn't know about them. This looks like groundwork
-for a future car-roster expansion task — don't assume any of it is stray/safe to
-delete; ask the user before touching these files, and if a task ever asks to add
-cars from them, check for a `body`/`wheel_fl`/`wheel_fr`/`wheel_rl`/`wheel_rr`
-node-naming match per `car-model.js`'s loader contract (see its file header) before
-wiring one in, since a mismatch silently falls back to the primitive car.
+Untracked on purpose (never `git add` them, never delete/move them - rule from the user):
+the three ORIGINAL Sketchfab GLBs in the repo root
+(`2013_ferrari_458_spider.glb`, `2022_lamborghini_huracan_super_trofeo_evo2_carb.glb`,
+`bugatti_eb110_super_sport_1992_by_alex.ka..glb`) and their optimised copies in
+`assets/models/` (`ferrari-458-spider.glb` 340 KB, `huracan.glb` 2.2 MB,
+`bugatti-eb110.glb` 1.4 MB). The code references the optimised copies; they stay
+uncommitted until the user confirms each model's license (README "Credits" has TODOs).
+Without those files present, every car silently falls back to the tinted Ferrari.
+
+`git status` may show `ui.js` (or other files) as modified with an empty diff after any
+`sed -i` pass - that is `core.autocrlf=true` stat noise, the files are byte-identical.
 
 ## Build status
 
 | Stage | State |
 |---|---|
-| 1. Scaffold | Done |
-| 2. Google login + Skip Login (Demo Mode) fallback | Done — real Firebase project wired up |
-| 3. Track (spline circuit, curbs, barriers, gates, sky, trees, grandstand) | Done, **scaled 2.2x** (see below) |
-| 4. Car physics (cannon-es RaycastVehicle) | Done, untouched all session (see TUNING note) |
-| 5. Three cars (Ferrari GLB re-tinted + primitive fallback) | Done. Visual size bumped ~1.4x (car-model.js) |
-| 6. Camera POVs (chase / cockpit / cinematic, `C` cycles) | Done |
-| 7. AI commentary (Gemini) | Scripted fallback lines only — Gemini NOT wired up |
-| 8. Juice pass (screen shake, tire smoke, engine audio, FOV punch) | Partial — shake wired (barrier hits), tire smoke/engine audio not started |
-| 9. Results screen polish | Solo: done. Multiplayer: shared results table built, **not live-tested** |
-| 10. Multiplayer lobby (host/join, room codes, RTDB) | Built, **still not live-tested with 2 real players** — see blocker below |
-| 11. Multiplayer in-race sync (remote car puppets, position lerp, leaderboard) | **Code-complete, NOT live-tested** — same blocker |
-| 12. Larger track (2.2x scale) | **Done and verified** |
-| 13. Boost + repair pickups | **Done** (solo-only; multiplayer sync deliberately not built yet) |
-| 14. Barrier hit reaction (shake, speed cut, steering wobble) | **Done and verified** — see investigation notes below |
-| 15. Health/damage meter + 0%-HP respawn | **Built; respawn+repair-pickup interaction not fully live-verified** (browser pane went hidden mid-test) |
-| 16. Minimap | **Done** (local player only; remote markers not wired) |
+| 1-6. Scaffold, login, track, physics, cars, cameras | Done (earlier sessions) |
+| 7. AI commentary (Gemini) | Scripted fallback lines only - Gemini NOT wired up |
+| 8. Juice pass | Partial - shake wired; tire smoke/engine audio not started |
+| 9-11. Multiplayer lobby / in-race sync / shared results | Code-complete, **still never live-tested with 2 real players** (blocker below) |
+| 12-16. 2.2x track, pickups, barrier reaction, health, minimap | Done (earlier sessions) |
+| **2026-09-19 session** | |
+| T1. 0 HP respawn fix | Done, verified (sub-1% health now clamps to 0) |
+| T2. Analog speedometer (`speedometer.js`, written this session - it was not in the repo) | Done, verified |
+| T3. Car-select: hero car centred, bottom card strip slides, tint cross-fade | Done, verified |
+| T4. HUD banner: RESPAWNING / RECONNECTING (`.info/connected`) | Done; RESPAWNING verified, RECONNECTING listener unverified (no 2-player auth) |
+| T5. Wrong-way: 1.5 s grace, 10 s banner countdown, `resetCar()` | Done, verified (lap/checkpoint/trackDistance preserved) |
+| T6. Finish gantry at start/finish (visual only) | Done, verified (physics body count unchanged: 426) |
+| T7. Three real car models (Draco/WebP), auto-fitted, tinted-Ferrari fallback | Done, verified solo per car; 2-player check impossible |
+| T8-9. XP + levels + coins (`progression.js`) | Done, verified (pure functions + a real finished race) |
+| T10. Garage skin store (tints) | Done, verified (buy / blocked buy / equip / reload persist / race) |
 
 ## THE recurring blocker: Firebase Anonymous sign-in is still OFF
 
@@ -100,27 +96,33 @@ Realtime Database → Rules → Publish whenever this gets addressed.
 | `camera.js` | chase / cockpit / cinematic rigs, shake, FOV punch — untouched |
 | `ai-commentary.js` | scripted fallback lines + `commentate()` contract for Gemini |
 | `firebase-config.js` | Firebase project config (real values) — auth + `databaseURL` |
-| `assets/models/ferrari.glb` | car model (three.js examples, Ferrari 458 by vicent091036) |
+| `speedometer.js` | **New.** Self-contained canvas speed gauge (create / set / destroy) |
+| `progression.js` | **New.** XP, levels, coins, skins - pure math + localStorage, no DOM |
+| `assets/models/ferrari.glb` | fallback car model (three.js examples, Ferrari 458 by vicent091036) |
+| `assets/models/{ferrari-458-spider,huracan,bugatti-eb110}.glb` | optimised real car models - **untracked until licenses are confirmed** |
 | `assets/libs/draco/` | Draco decoder, shipped locally so GLB loads offline |
 
 ## CRITICAL GOTCHA — cache busting
 
-All local ES module imports carry a version query, currently **`?v=16`**:
+All local ES module imports carry a version query, currently **`?v=28`**:
 ```js
-import { createWorld } from "./physics.js?v=16";
+import { createWorld } from "./physics.js?v=28";
 ```
-`index.html` has both `<script type="module" src="main.js?v=16">` and
-`<link rel="stylesheet" href="styles.css?v=16">`. **The browser caches these files
+`index.html` has both `<script type="module" src="main.js?v=28">` and
+`<link rel="stylesheet" href="styles.css?v=28">`. **The browser caches these files
 independently of the page.** Editing a module without bumping the version means
 your changes silently do not load. After editing any module or the stylesheet, bump
-every `?v=N` together as the LAST step, e.g. from `v=16` to `v=17`:
+every `?v=N` together as the LAST step, e.g. from `v=28` to `v=29`:
 ```bash
 cd "/d/Gaming Hackathon" && \
-  sed -i 's/\.js?v=16"/.js?v=17"/g' main.js auth.js multiplayer.js pickups.js minimap.js && \
-  sed -i 's/main.js?v=16/main.js?v=17/; s/styles.css?v=16/styles.css?v=17/' index.html
+  sed -i 's/\.js?v=28"/.js?v=29"/g' main.js auth.js multiplayer.js pickups.js && \
+  sed -i 's/main.js?v=28/main.js?v=29/; s/styles.css?v=28/styles.css?v=29/' index.html
 ```
-Verify with a hard refresh (Ctrl+Shift+R) or by checking
-`performance.getEntriesByType('resource')` for the right `?v=` suffix in the console.
+(Only main.js, auth.js, multiplayer.js and pickups.js contain versioned imports; the
+other modules import only `three`/`cannon-es`.) `index.html` itself is also heuristically
+cached by Chrome with `python -m http.server` - a hard refresh (Ctrl+Shift+R) or a fresh
+query string (`/?r=1`) is needed to pick up a new version number. Verify with
+`performance.getEntriesByType('resource')` for the right `?v=` suffix.
 
 ## Barrier-hit reaction — bug investigation (do not re-chase this)
 
@@ -169,7 +171,12 @@ same reasoning as the existing upside-down/stranded recovery) and consumed on
 the next `updateRace()` tick: calls the **existing** `resetCar()` function,
 restores health to `HEALTH_RESPAWN_PCT`, shows a toast.
 
-**Verified with real screenshots:** HP dropping from a real barrier hit
+**2026-09-19 fix:** damage is fractional, so health could end at e.g. 0.4 - the HUD
+rounded that to "0%" but `<= 0` never fired. `onCollide` now clamps anything under 1%
+to 0. Respawn + 50% heal + "RESPAWNING" banner + repair pickup (+35) are all verified
+live via `ER.updateRace` stepping.
+
+**Verified with real screenshots (earlier):** HP dropping from a real barrier hit
 (100%→84%, with a matching speed-cut and crash-commentary toast, all from one
 collision), and the UI clamp (fed -45 directly into `ui.setHudHealth()`, got a
 clean "0%", never broken/negative). **NOT verified live:** actually driving to
@@ -236,19 +243,20 @@ header comment).
 ## Debug handle
 
 `window.ER` exposes `{ state, cameraRig, TUNING, keys, camera, THREE, mp, remotes,
-computeLeaderboard, computeResultsBoard }`.
+computeLeaderboard, computeResultsBoard, updateRace, hudBanner, showcase, prog }`.
 ```js
 ER.state.race.veh.speedKmh()
 ER.state.race.health                              // current HP (0-100)
-ER.state.race.track.nearest(ER.state.race.veh.chassisBody.position).dist
-ER.TUNING.ENGINE_FORCE = 7000                       // live tuning
-ER.keys.add('up')                                   // simulate input
-ER.state.race.veh.chassisBody.world.bodies.length   // physics body count (426 on
-                                                     // the current track - useful
-                                                     // for checking barrier bodies)
+ER.updateRace(1/60)                               // step ONE race frame by hand (see Testing notes)
+ER.state.race.countdownEnd = performance.now()-1  // then step a few frames: skips the countdown
+ER.hudBanner                                      // { reconnecting, respawnUntil, wrongWay }
+ER.showcase                                       // THREE.Group holding the car-select hero car
+ER.prog.raceXP({...}) / ER.prog.levelFromXP(n)    // progression.js pure functions
+ER.state.race.speedo.value                        // eased needle value (km/h)
+ER.TUNING.ENGINE_FORCE = 7000                     // live tuning
+ER.keys.add('up')                                 // simulate input
 ```
-`pickups`/`minimap` controllers live on `ER.state.race.pickups` /
-`ER.state.race.minimap` — not on the top-level `ER` object.
+`pickups`/`minimap`/`speedo` controllers live on `ER.state.race.*`.
 
 ## Controls
 
@@ -317,25 +325,78 @@ implemented differently either way.
 
 ## Suggested next steps (in order)
 
-1. **Enable Firebase Anonymous sign-in** (one click, see blocker section) — this
-   unblocks literally every remaining multiplayer verification task.
-2. **Live 2-player test** once #1 is done: two browser profiles/incognito windows
-   (or `localhost` vs `127.0.0.1` origins, which get separate Firebase Auth
-   sessions in the *same* browser — a proven trick from this session) both on
-   `http://localhost:8080`. Verify remote car rendering, leaderboard sync, and
-   shared results specifically — that's the part with zero real-player evidence.
-3. **Finish verifying the health respawn + repair pickup interaction live** —
-   the one thing this session couldn't complete due to the browser pane going
-   hidden. Should be quick: drive to 0% HP, confirm respawn + 50% heal; drive
-   over a green cross, confirm HP increases.
-4. Wire Gemini commentary (key drop-in + race against `FALLBACK_AFTER_MS`).
-5. Tire smoke / engine audio (Stage 8 remainder).
-6. Ask the user about the loose GLB car files appearing in the repo root (see
-   "Git status" above) — likely a future car-roster task; check the node-naming
-   contract before wiring any in.
-7. Stop adding features in the last 3-4 hours; bug fix, polish, rehearse.
+1. **Enable Firebase Anonymous sign-in** (one click, see blocker section) - still the
+   single thing blocking every multiplayer verification (2-player join, leaderboard,
+   shared results, RECONNECTING banner, remote real-model puppets).
+2. **Confirm the three car-model licenses**, fill the README "Credits" TODOs, then
+   `git add assets/models/*.glb` by path and commit. Until then the optimised models
+   are untracked and a fresh clone falls back to the tinted Ferrari for every car.
+3. **Tune `PAR_SPEED_MPS` in `progression.js`** (28 m/s now) after a clean lap - it is
+   the single knob behind the XP speed multiplier.
+4. Live 2-player test once #1 is done (see Testing notes for the localhost/127.0.0.1 trick).
+5. Wire Gemini commentary; tire smoke / engine audio (Stage 8 remainder).
+6. Optional polish noticed but not done: Huracan is tint-disabled (carbon livery, no
+   single paint material); wheels on all three real models are static (baked into
+   one mesh each); six harmless `ERR_CONNECTION_RESET` console lines appear when the
+   real models' texture blobs load (rendering is fine).
+
+## 2026-09-19 session - what was added and where
+
+- **0 HP respawn** (`main.js` onCollide): damage is fractional, so health could land on
+  e.g. 0.4 - HUD showed "0%" but the `<= 0` check never fired. Anything under 1% is now 0.
+- **Speedometer** (`speedometer.js`, new, self-contained canvas gauge): created in
+  `startRace`, `set(kmh)` each frame, `destroy()` in `teardownRace`; every call is
+  try/catch-guarded. Old `.hud-speed` text readout is hidden in CSS (element still exists,
+  `ui.setHudSpeed` still updates it).
+- **Car select** (`styles.css` + `main.js`): `#screen-select` is bottom-justified, the
+  `.car-list` strip is translated by `slideStrip()` so the selected card is centred;
+  `fadeSwapShowcase()` cross-fades material opacity on car change. Camera look-at is
+  lowered on the select screen only (`frame()`).
+- **HUD banner** (`#hud-banner`, `ui.setHudBanner`, `main.js` `hudBanner` +
+  `refreshBanner()` every race tick): priority RECONNECTING > RESPAWNING > WRONG WAY n.
+  `multiplayer.js` got an additive `onConnectionChange(fn)` fed by a persistent
+  `.info/connected` listener (only after online play has connected once).
+- **Wrong-way** (`main.js` `updateWrongWay`, constants `WRONG_WAY_*`): velocity (not
+  heading) against the nearest sample tangent below -15 km/h; 1.5 s grace, then a 10 s
+  countdown in the banner, then `resetCar()` - which only moves the chassis, so lap /
+  nextCp / trackDistance survive. Applies in solo and multiplayer.
+- **Finish gantry** (`track.js` `makeFinishGantry`): replaces the checkpoint-0 gate.
+  Towers + tall canvas-textured FINISH banner (front and mirrored back face) + flags.
+- **Real car models** (`cars.js` `model` / `paintMaterial` / `fit`, `car-model.js`
+  `instantiateReal` + `loadCarModelQuick`): none of the GLBs use the body/wheel_* node
+  contract, so the model is recentred, scaled so its long axis equals the Ferrari's raw
+  length (VISUAL_SCALE applied on top exactly like the Ferrari), min-y put on the ground,
+  optionally flipped 180deg; wheels are baked/static and the physics wheel layout is the
+  Ferrari's, so handling is unchanged. Race start waits at most `REAL_MODEL_WAIT_MS`
+  (3 s) then races the tinted Ferrari and swaps the real body in when it lands
+  (remote puppets do the same). Mapping: Viper GT = 458 Spider (paint
+  `Vehicle_Exterior_mm_ext`, no flip), Kestrel = Huracan ST EVO2 (tint-disabled, flip),
+  Brawler = Bugatti EB110 (paint `Bugatti_EB110SS_By_Alex_Ka`, flip, hides the asset's
+  `floor` / `carshadow` / `red_carpet` meshes). Optimised with
+  `npx @gltf-transform/cli optimize <in> <out> --compress draco --texture-compress webp --texture-size 1024`
+  (one-off, not in the repo).
+- **Progression** (`progression.js`, new, no DOM): `raceXP`, `xpToNext`, `levelFromXP`,
+  `coinsForXP` (0.6), `loadProgress`/`saveProgress` on localStorage key
+  `er_progress_v1_<uid|demo>` (Demo Mode starts with 500 coins, Google users with 0),
+  `applyRaceResult`, skin catalog (`SKIN_CATALOG`: default + 300 + 800 coins per car),
+  `buySkin`/`equipSkin`/`skinColor`. Awarded in exactly one place: `finishRace()` in
+  `main.js`, only when `r.phase === "finished"`, wrapped in try/catch. Multiplayer place
+  comes from `computeResultsBoard(room)` at finish time; if unavailable podium = 0.
+  Results screen: `#results-xp` block (`ui.renderProgress`). Car-select header:
+  `#coin-chip` + Garage button; **Garage screen** (`#screen-garage`, `renderGarage()` in
+  main.js, `ui.renderGarage`). Skins are applied by passing `skinnedCar(carCfg)` (the car
+  config with `color` replaced) into the existing tint path at both `setShowcaseCar`
+  and `startRace`. Tint-disabled cars show "Stock only".
 
 ## Testing notes for whoever continues
+
+**Deterministic stepping (new, use this first):** the browser pane used for automated
+testing often reports itself hidden, which freezes `requestAnimationFrame` entirely.
+`ER.updateRace(1/60)` steps one race frame synchronously regardless, so a whole
+scenario (teleport, set velocity, step N frames, read HUD) runs inside ONE
+`javascript_tool` call with no dependence on the pane pumping frames. Skip the
+countdown with `ER.state.race.countdownEnd = performance.now() - 1` then step 3 frames.
+Screenshots still need the pane visible (`tabs_select` sometimes brings it back).
 
 The browser pane used for automated testing throttles `requestAnimationFrame`
 when hidden, so the game clock only advances while a screenshot or wait action is
