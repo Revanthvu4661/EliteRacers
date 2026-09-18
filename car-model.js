@@ -1,0 +1,255 @@
+// ============================================================================
+// car-model.js - car visuals.
+//
+//   loadCarModel(carConfig) -> Promise<CarModel>
+//     Option A: GLTF (assets/models/ferrari.glb, cached, re-tinted per car).
+//     Option B: buildCarModel(colorHex) - low-poly primitives fallback if the
+//               GLB fails to load for any reason.
+//
+//   CarModel = {
+//     body:   THREE.Group   (everything except the wheels; origin at ground level,
+//                            car faces -Z, +X is the car's right side)
+//     wheels: [{ node, position: Vector3 (model frame), radius, isFront, side }]
+//             fl, fr, rl, rr in that order. Each wheel rolls about its local X.
+//     source: "gltf" | "primitive"
+//   }
+//
+//   assembleStatic(model) -> Group with the wheels attached (menus / previews)
+//
+// Art teammates: to use a different GLB, set `model` in cars.js. The loader looks
+// for nodes named body / wheel_fl / wheel_fr / wheel_rl / wheel_rr (three.js's
+// Ferrari has exactly these). Anything else falls back to the primitive car.
+// ============================================================================
+
+import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
+
+const DEFAULT_MODEL_URL = "./assets/models/ferrari.glb";
+const DRACO_PATH = "./assets/libs/draco/"; // decoder shipped locally: no CDN needed at demo time
+const LOAD_TIMEOUT_MS = 8000;
+
+const gltfCache = new Map(); // url -> Promise<gltf.scene>
+
+function loadGltfOnce(url) {
+  if (!gltfCache.has(url)) {
+    const p = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("GLB load timed out")), LOAD_TIMEOUT_MS);
+      const draco = new DRACOLoader().setDecoderPath(DRACO_PATH);
+      const loader = new GLTFLoader().setDRACOLoader(draco);
+      loader.load(
+        url,
+        (gltf) => { clearTimeout(timer); resolve(gltf.scene); },
+        undefined,
+        (err) => { clearTimeout(timer); reject(err); }
+      );
+    });
+    p.catch(() => gltfCache.delete(url)); // allow a retry next time
+    gltfCache.set(url, p);
+  }
+  return gltfCache.get(url);
+}
+
+/** Kick off the GLB download early (call at boot). Never rejects. */
+export function preloadCarAssets() {
+  return loadGltfOnce(DEFAULT_MODEL_URL).then(() => true, () => false);
+}
+
+// ---------------------------------------------------------------------------
+
+export async function loadCarModel(carConfig) {
+  const url = carConfig.model || DEFAULT_MODEL_URL;
+  try {
+    const template = await loadGltfOnce(url);
+    const model = instantiateGltf(template, carConfig);
+    if (model) return model;
+    console.warn("[car-model] GLB missing expected nodes, using primitive car");
+  } catch (err) {
+    console.warn("[car-model] GLB unavailable, using primitive car:", err?.message || err);
+  }
+  return buildCarModel(carConfig.color);
+}
+
+function instantiateGltf(template, carConfig) {
+  const root = template.clone(true);
+  root.scale.setScalar(carConfig.scale || 1);
+
+  const bodyMesh = root.getObjectByName("body");
+  const wheelNodes = ["wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr"].map((n) => root.getObjectByName(n));
+  if (!bodyMesh || wheelNodes.some((w) => !w)) return null;
+
+  // Materials: fresh paint per instance so tints don't leak between cars.
+  const paint = new THREE.MeshPhysicalMaterial({
+    color: carConfig.color, metalness: 0.55, roughness: 0.32, clearcoat: 1.0, clearcoatRoughness: 0.05,
+  });
+  const details = new THREE.MeshStandardMaterial({ color: 0xdadada, metalness: 1.0, roughness: 0.35 });
+  const glass = new THREE.MeshPhysicalMaterial({ color: 0x9fbbd8, metalness: 0.2, roughness: 0.05, transparent: true, opacity: 0.55 });
+
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    o.castShadow = true;
+    o.receiveShadow = false;
+    if (o.name === "body") o.material = paint;
+    else if (/^rim_|^trim$|^centre$|^nuts$/.test(o.name)) o.material = details;
+    else if (o.name === "glass") o.material = glass;
+    else if (o.material) o.material = o.material.clone();
+  });
+
+  // Wheel radius from geometry (tyre mesh bounds).
+  const wheels = wheelNodes.map((node, i) => {
+    const box = new THREE.Box3().setFromObject(node);
+    const radius = (box.max.y - box.min.y) / 2 || 0.36;
+    return {
+      node,
+      position: node.position.clone(),
+      quaternion: node.quaternion.clone(),
+      radius,
+      isFront: i < 2,
+      side: i % 2 === 0 ? -1 : 1,
+    };
+  });
+
+  // Wheels become independent so physics can drive them; body keeps the rest.
+  wheels.forEach((w) => w.node.removeFromParent());
+
+  const body = new THREE.Group();
+  body.name = "car-body";
+  body.add(root);
+  return { body, wheels, source: "gltf" };
+}
+
+// ---------------------------------------------------------------------------
+// Option B: low-poly car from primitives. Same frame as the GLB: origin on the
+// ground, faces -Z, wheels roll about local X.
+// ---------------------------------------------------------------------------
+export function buildCarModel(colorHex = 0xff3b3b) {
+  const body = new THREE.Group();
+  body.name = "car-body";
+
+  const paint = new THREE.MeshPhysicalMaterial({ color: colorHex, metalness: 0.5, roughness: 0.35, clearcoat: 0.8, clearcoatRoughness: 0.1 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x15171c, roughness: 0.85 });
+  const chrome = new THREE.MeshStandardMaterial({ color: 0xcfd4dc, metalness: 1, roughness: 0.3 });
+  const glass = new THREE.MeshPhysicalMaterial({ color: 0x8fb3d9, metalness: 0.2, roughness: 0.05, transparent: true, opacity: 0.45 });
+  const headMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff2c0, emissiveIntensity: 1.6 });
+  const tailMat = new THREE.MeshStandardMaterial({ color: 0xff2020, emissive: 0xff1010, emissiveIntensity: 1.4 });
+
+  // Side silhouette in the (z, y) plane: nose at -Z, tail at +Z. Extruded along X.
+  const W = 1.7;
+  const shape = new THREE.Shape();
+  shape.moveTo(-2.3, 0.28);   // nose bottom
+  shape.lineTo(-2.35, 0.5);   // nose lip
+  shape.lineTo(-1.6, 0.62);   // bonnet start
+  shape.lineTo(-0.7, 0.72);   // bonnet end / windshield base
+  shape.lineTo(-0.1, 1.18);   // windshield top
+  shape.lineTo(0.9, 1.2);     // roof
+  shape.lineTo(1.7, 0.85);    // rear window
+  shape.lineTo(2.25, 0.8);    // boot
+  shape.lineTo(2.3, 0.32);    // tail bottom
+  shape.lineTo(1.9, 0.2);
+  shape.lineTo(-1.9, 0.2);
+  shape.closePath();
+  const bodyGeo = new THREE.ExtrudeGeometry(shape, { depth: W, bevelEnabled: true, bevelThickness: 0.08, bevelSize: 0.08, bevelSegments: 2 });
+  // Extrude goes along +Z; rotate so the profile runs along the car's length (Z) and the
+  // extrusion becomes width (X), centred.
+  bodyGeo.rotateY(-Math.PI / 2);
+  bodyGeo.translate(W / 2, 0, 0);
+  const shell = new THREE.Mesh(bodyGeo, paint);
+  shell.castShadow = true;
+  body.add(shell);
+
+  // Cabin glass (slightly inset so it reads through the paint).
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(W - 0.3, 0.5, 1.9), glass);
+  cabin.position.set(0, 0.98, 0.35);
+  cabin.rotation.x = -0.05;
+  body.add(cabin);
+
+  // Spoiler
+  const wing = new THREE.Mesh(new THREE.BoxGeometry(W + 0.1, 0.06, 0.45), dark);
+  wing.position.set(0, 1.12, 2.05);
+  wing.castShadow = true;
+  body.add(wing);
+  for (const x of [-0.7, 0.7]) {
+    const strut = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.3, 0.25), dark);
+    strut.position.set(x, 0.96, 2.05);
+    body.add(strut);
+  }
+
+  // Front splitter + rear diffuser
+  const splitter = new THREE.Mesh(new THREE.BoxGeometry(W + 0.15, 0.06, 0.5), dark);
+  splitter.position.set(0, 0.25, -2.25);
+  body.add(splitter);
+
+  // Lights
+  for (const x of [-0.65, 0.65]) {
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.14, 0.1), headMat);
+    head.position.set(x, 0.55, -2.34);
+    body.add(head);
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.12, 0.08), tailMat);
+    tail.position.set(x, 0.62, 2.32);
+    body.add(tail);
+  }
+  // Grille + mirrors
+  const grille = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.18, 0.08), dark);
+  grille.position.set(0, 0.42, -2.36);
+  body.add(grille);
+  for (const x of [-1.05, 1.05]) {
+    const mirror = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.12, 0.22), paint);
+    mirror.position.set(x * 0.95, 0.88, -0.45);
+    body.add(mirror);
+  }
+
+  // Wheels: tyre (dark) + rim (chrome) + hub. Cylinder axis rotated onto X (the axle).
+  const R = 0.36;
+  const tyreGeo = new THREE.CylinderGeometry(R, R, 0.3, 24);
+  tyreGeo.rotateZ(Math.PI / 2);
+  const rimGeo = new THREE.CylinderGeometry(R * 0.62, R * 0.62, 0.32, 12);
+  rimGeo.rotateZ(Math.PI / 2);
+  const hubGeo = new THREE.CylinderGeometry(R * 0.2, R * 0.2, 0.34, 8);
+  hubGeo.rotateZ(Math.PI / 2);
+  const spokeGeo = new THREE.BoxGeometry(0.33, R * 1.1, 0.06);
+
+  const layout = [
+    { name: "fl", x: -0.92, z: -1.35, isFront: true, side: -1 },
+    { name: "fr", x: 0.92, z: -1.35, isFront: true, side: 1 },
+    { name: "rl", x: -0.92, z: 1.35, isFront: false, side: -1 },
+    { name: "rr", x: 0.92, z: 1.35, isFront: false, side: 1 },
+  ];
+  const wheels = layout.map((l) => {
+    const node = new THREE.Group();
+    node.name = "wheel_" + l.name;
+    const tyre = new THREE.Mesh(tyreGeo, dark);
+    const rim = new THREE.Mesh(rimGeo, chrome);
+    const hub = new THREE.Mesh(hubGeo, dark);
+    tyre.castShadow = true;
+    node.add(tyre, rim, hub);
+    for (let k = 0; k < 3; k++) {
+      const spoke = new THREE.Mesh(spokeGeo, chrome);
+      spoke.rotation.x = (k / 3) * Math.PI;
+      node.add(spoke);
+    }
+    return {
+      node,
+      position: new THREE.Vector3(l.x, R, l.z),
+      quaternion: new THREE.Quaternion(),
+      radius: R,
+      isFront: l.isFront,
+      side: l.side,
+    };
+  });
+
+  return { body, wheels, source: "primitive" };
+}
+
+// ---------------------------------------------------------------------------
+
+/** Wheels attached at rest: for the showcase / car-select preview. */
+export function assembleStatic(model) {
+  const g = new THREE.Group();
+  g.add(model.body);
+  for (const w of model.wheels) {
+    w.node.position.copy(w.position);
+    w.node.quaternion.copy(w.quaternion);
+    g.add(w.node);
+  }
+  return g;
+}

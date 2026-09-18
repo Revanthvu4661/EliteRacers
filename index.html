@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Elite Racers</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏎️</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css?v=9" />
+
+  <!-- Import map: every module imports "three", "three/addons/..." and "cannon-es"
+       by bare name. Change versions here, nowhere else. No build step. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
+      "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <!-- ============ 3D canvas (shared by menus and the race) ============ -->
+  <canvas id="game-canvas"></canvas>
+
+  <!-- ============ SCREEN: LOGIN ============ -->
+  <section id="screen-login" class="screen active">
+    <div class="login-card">
+      <div class="brand">
+        <div class="brand-flag"></div>
+        <h1 class="brand-title">ELITE<span>RACERS</span></h1>
+        <p class="brand-sub">ACM LudusForge 2.0 &middot; Racing</p>
+      </div>
+
+      <button id="btn-google" class="btn btn-primary">
+        <svg class="g-logo" viewBox="0 0 48 48" aria-hidden="true">
+          <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3l5.7-5.7C34.1 6.1 29.3 4 24 4 13 4 4 13 4 24s9 20 20 20 20-9 20-20c0-1.3-.1-2.4-.4-3.5z"/>
+          <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3l5.7-5.7C34.1 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/>
+          <path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/>
+          <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.3-4.1 5.6l6.2 5.2C41 35.4 44 30.2 44 24c0-1.3-.1-2.4-.4-3.5z"/>
+        </svg>
+        <span>Sign in with Google</span>
+      </button>
+
+      <button id="btn-skip" class="btn btn-ghost">Skip Login (Demo Mode)</button>
+
+      <p id="login-status" class="status" aria-live="polite"></p>
+    </div>
+  </section>
+
+  <!-- ============ SCREEN: CAR SELECT ============ -->
+  <section id="screen-select" class="screen">
+    <header class="topbar">
+      <span class="topbar-title">CHOOSE YOUR CAR</span>
+      <span class="topbar-right">
+        <span id="player-chip" class="chip"></span>
+        <button id="btn-signout" class="btn btn-small btn-ghost">Sign out</button>
+      </span>
+    </header>
+    <div id="car-list" class="car-list"></div>
+    <footer class="bottombar">
+      <button id="btn-race" class="btn btn-primary btn-wide">RACE SOLO</button>
+      <button id="btn-multiplayer" class="btn btn-ghost btn-wide">MULTIPLAYER</button>
+    </footer>
+  </section>
+
+  <!-- ============ SCREEN: MULTIPLAYER LOBBY ============ -->
+  <section id="screen-lobby" class="screen">
+    <header class="topbar">
+      <span class="topbar-title">MULTIPLAYER</span>
+      <span class="topbar-right"><span id="lobby-chip" class="chip"></span></span>
+    </header>
+
+    <div class="lobby-card">
+      <!-- Menu: host or join -->
+      <div id="lobby-menu" class="lobby-panel">
+        <h2 class="lobby-title">RACE ONLINE</h2>
+        <p class="lobby-sub">Up to 4 racers. Host a room and read the code out, or join a friend's.</p>
+        <button id="btn-host" class="btn btn-primary">Host Race</button>
+        <button id="btn-join-open" class="btn btn-ghost">Join Race</button>
+        <p id="lobby-status" class="status" aria-live="polite"></p>
+        <button id="btn-lobby-back" class="btn btn-small btn-ghost lobby-back">Back to car select</button>
+      </div>
+
+      <!-- Join: enter a code -->
+      <form id="lobby-join" class="lobby-panel" hidden>
+        <h2 class="lobby-title">JOIN RACE</h2>
+        <label class="lobby-sub" for="join-code">Enter the 5-character room code</label>
+        <input id="join-code" class="code-input" maxlength="5" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="•••••" />
+        <button id="btn-join" type="submit" class="btn btn-primary">Join</button>
+        <p id="join-status" class="status" aria-live="polite"></p>
+        <button id="btn-join-back" type="button" class="btn btn-small btn-ghost lobby-back">Back</button>
+      </form>
+
+      <!-- Room: code + live player list -->
+      <div id="lobby-room" class="lobby-panel" hidden>
+        <p class="room-label">ROOM CODE</p>
+        <button id="room-code" class="room-code" title="Click to copy"></button>
+        <p class="room-players-head"><span>RACERS</span><span id="room-count"></span></p>
+        <ul id="room-players" class="room-players"></ul>
+        <p id="room-status" class="status" aria-live="polite"></p>
+        <button id="btn-room-start" class="btn btn-primary">Start Race</button>
+        <button id="btn-room-leave" class="btn btn-small btn-ghost lobby-back">Leave room</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SCREEN: RACE (HUD only; the 3D scene renders on #game-canvas) ============ -->
+  <section id="screen-race" class="screen">
+    <div class="hud">
+      <div class="hud-top-left">
+        <div class="hud-lap">LAP <span id="hud-lap">1</span>/<span id="hud-laps">3</span></div>
+        <div class="hud-time" id="hud-time">00:00.000</div>
+        <div class="hud-best" id="hud-best"></div>
+      </div>
+      <div class="hud-bottom-right">
+        <div class="hud-speed"><span id="hud-speed">0</span><small> km/h</small></div>
+      </div>
+      <div class="hud-bottom-left">
+        <div class="hud-cam-label">CAM <span id="hud-cam">CHASE</span></div>
+        <div class="hud-controls"><kbd>W A S D</kbd> drive &nbsp; <kbd>Space</kbd> drift &nbsp; <kbd>C</kbd> camera &nbsp; <kbd>R</kbd> reset</div>
+      </div>
+      <div class="hud-commentary" id="hud-commentary"></div>
+      <div class="hud-center" id="hud-center"></div>
+    </div>
+    <button id="btn-quit" class="btn btn-small btn-ghost hud-quit">Quit</button>
+  </section>
+
+  <!-- ============ SCREEN: RESULTS ============ -->
+  <section id="screen-results" class="screen">
+    <div class="results-card">
+      <h2 class="results-title">RACE COMPLETE</h2>
+      <p class="results-name" id="results-name"></p>
+      <ul class="results-laps" id="results-laps"></ul>
+      <div class="results-actions">
+        <button id="btn-again" class="btn btn-primary">Play Again</button>
+        <button id="btn-change-car" class="btn btn-ghost">Change Car</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Loading overlay (track build / model load) -->
+  <div id="loading-overlay">
+    <div class="spinner"></div>
+    <div id="loading-text"></div>
+  </div>
+
+  <!-- Toasts (errors, notices) -->
+  <div id="toast-root"></div>
+
+  <script type="module" src="main.js?v=9"></script>
+</body>
+</html>

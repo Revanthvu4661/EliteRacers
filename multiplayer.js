@@ -1,0 +1,265 @@
+// ============================================================================
+// multiplayer.js - online rooms on Firebase Realtime Database (no custom server).
+//
+// Public API (every async call throws an Error whose .message is user-facing):
+//   hostRoom(profile)            -> Promise<code>   create a room, join it as host
+//   joinRoom(code, profile)      -> Promise<code>   join a waiting room
+//   startRoomRace()              -> Promise<void>   host only: status "racing" + start time
+//   leaveRoom()                  -> Promise<void>   leave (host leaving a waiting room closes it)
+//   onRoomChange(fn)             -> fn(view | null, reason?) on every room update
+//   getRoom()                    -> current view or null
+//   serverToLocalTime(ms)        -> converts a server timestamp to local Date.now() time
+//
+// profile = { name, carId }
+//
+// Data layout (/rooms/{code}):
+//   { hostId, status: "waiting"|"racing"|"finished", createdAt, raceStartAt,
+//     players: { <uid>: { name, carId, position, quaternion, speed, lap, finished, joinedAt } } }
+//
+// Degrades gracefully: the SDK loads lazily, connecting has a timeout, and any
+// failure surfaces as a message so the UI can offer solo play instead.
+// ============================================================================
+
+import { getFirebaseApp, ensureFirebaseUid } from "./auth.js?v=9";
+
+const SDK_URL = "https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js";
+
+export const MAX_PLAYERS = 4;
+export const MIN_PLAYERS = 2;
+export const START_DELAY_MS = 3000;
+
+// Uppercase + digits minus the ambiguous 0/O and 1/I (and L, which reads as 1 aloud).
+const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+const CODE_LENGTH = 5;
+const CODE_RE = new RegExp(`^[${CODE_ALPHABET}]{${CODE_LENGTH}}$`);
+
+const CONNECT_TIMEOUT_MS = 8000;
+
+let fb = null;             // firebase-database ES module
+let db = null;
+let uid = null;
+let serverOffset = 0;      // server time = Date.now() + serverOffset
+let room = null;           // { code, roomRef, playerRef, unsubscribe, view }
+let roomListener = () => {};
+
+// ---------------------------------------------------------------------------
+
+function withTimeout(promise, ms, message) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(message)), ms);
+    promise.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+  });
+}
+
+function serverNow() {
+  return Date.now() + serverOffset;
+}
+
+export function serverToLocalTime(serverMs) {
+  return serverMs - serverOffset;
+}
+
+export function getUid() {
+  return uid;
+}
+
+export function getRoom() {
+  return room ? room.view : null;
+}
+
+export function onRoomChange(fn) {
+  roomListener = fn || (() => {});
+}
+
+function friendly(err, fallback) {
+  const msg = err?.message || "";
+  if (/permission.denied/i.test(msg) || err?.code === "PERMISSION_DENIED") {
+    return "The game server refused the request (check Realtime Database rules).";
+  }
+  return msg || fallback;
+}
+
+/** Load the SDK, sign in (anonymously for guests) and confirm the database is reachable. */
+async function connect() {
+  const app = getFirebaseApp();
+  if (!app) throw new Error("Online play is unavailable right now. Race solo instead.");
+
+  uid = await ensureFirebaseUid();
+
+  if (!fb) {
+    fb = await withTimeout(import(SDK_URL), CONNECT_TIMEOUT_MS, "Couldn't load the multiplayer service. Check your connection.");
+    db = fb.getDatabase(app);
+    fb.onValue(fb.ref(db, ".info/serverTimeOffset"), (s) => { serverOffset = s.val() || 0; });
+  }
+
+  // .info/connected fires false first, then true once the socket is up.
+  await withTimeout(new Promise((resolve) => {
+    const stop = fb.onValue(fb.ref(db, ".info/connected"), (s) => {
+      if (s.val() === true) { stop(); resolve(); }
+    });
+  }), CONNECT_TIMEOUT_MS, "Can't reach the game server. Check your Wi-Fi, or race solo.");
+}
+
+function randomCode() {
+  const bytes = crypto.getRandomValues(new Uint8Array(CODE_LENGTH));
+  return Array.from(bytes, (b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join("");
+}
+
+function playerNode(profile) {
+  return {
+    name: String(profile.name || "Racer").slice(0, 24),
+    carId: profile.carId,
+    position: { x: 0, y: 0, z: 0 },
+    quaternion: { x: 0, y: 0, z: 0, w: 1 },
+    speed: 0,
+    lap: 0,
+    finished: false,
+    joinedAt: serverNow(),
+  };
+}
+
+function buildView(code, data) {
+  const players = Object.entries(data.players || {})
+    .map(([id, p]) => ({ uid: id, name: p.name, carId: p.carId, joinedAt: p.joinedAt || 0,
+                         isHost: id === data.hostId, isMe: id === uid }))
+    .sort((a, b) => a.joinedAt - b.joinedAt);
+  return {
+    code,
+    status: data.status,
+    hostId: data.hostId,
+    isHost: data.hostId === uid,
+    hostPresent: players.some((p) => p.isHost),
+    raceStartAt: data.raceStartAt || null,
+    players,
+    raw: data,
+  };
+}
+
+/** Subscribe to the room and register disconnect cleanup. */
+async function attach(code, isHost) {
+  const roomRef = fb.ref(db, `rooms/${code}`);
+  const playerRef = fb.ref(db, `rooms/${code}/players/${uid}`);
+
+  // Dropped connection -> our player node disappears for everyone else.
+  // A host dropping out of a *waiting* room closes the room entirely.
+  await fb.onDisconnect(playerRef).remove();
+  if (isHost) await fb.onDisconnect(roomRef).remove();
+
+  room = { code, roomRef, playerRef, isHost, view: null, unsubscribe: null };
+  const myRoom = room;
+  myRoom.unsubscribe = fb.onValue(roomRef, (snap) => {
+    if (room !== myRoom) return;
+    const data = snap.val();
+    if (!data) { detach(); roomListener(null, "The host closed the room."); return; }
+    if (!data.players || !data.players[uid]) { detach(); roomListener(null, "You were disconnected from the room."); return; }
+    myRoom.view = buildView(code, data);
+    roomListener(myRoom.view);
+  }, (err) => {
+    if (room !== myRoom) return;
+    detach();
+    roomListener(null, friendly(err, "Lost connection to the room."));
+  });
+}
+
+function detach() {
+  if (!room) return;
+  if (room.unsubscribe) room.unsubscribe();
+  room = null;
+}
+
+// ---------------------------------------------------------------------------
+
+export async function hostRoom(profile) {
+  await leaveRoom();
+  try {
+    await connect();
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const code = randomCode();
+      const newRoom = {
+        hostId: uid,
+        status: "waiting",
+        createdAt: serverNow(),
+        players: { [uid]: playerNode(profile) },
+      };
+      // Create only if the code is free. (A null guess that's wrong is retried
+      // by the SDK with the real server value, which we then decline.)
+      const res = await fb.runTransaction(fb.ref(db, `rooms/${code}`), (cur) => (cur === null ? newRoom : undefined));
+      if (res.committed) {
+        await attach(code, true);
+        return code;
+      }
+    }
+    throw new Error("Couldn't find a free room code. Try again.");
+  } catch (err) {
+    console.warn("[mp] hostRoom:", err);
+    throw new Error(friendly(err, "Couldn't create a room."));
+  }
+}
+
+export function normalizeCode(input) {
+  return String(input || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+export async function joinRoom(rawCode, profile) {
+  const code = normalizeCode(rawCode);
+  if (!CODE_RE.test(code)) throw new Error(`Room codes are ${CODE_LENGTH} letters/numbers.`);
+  await leaveRoom();
+
+  let reason = null;
+  try {
+    await connect();
+    const res = await fb.runTransaction(fb.ref(db, `rooms/${code}`), (cur) => {
+      reason = null;
+      if (cur === null) { reason = "Room not found."; return cur; }
+      const players = cur.players || {};
+      if (players[uid]) {                              // rejoining after a refresh
+        if (cur.status !== "waiting") { reason = "Race already started."; return; }
+        players[uid] = { ...players[uid], name: profile.name, carId: profile.carId };
+        cur.players = players;
+        return cur;
+      }
+      if (cur.status !== "waiting") { reason = "Race already started."; return; }
+      if (Object.keys(players).length >= MAX_PLAYERS) { reason = "Room is full."; return; }
+      players[uid] = playerNode(profile);
+      cur.players = players;
+      return cur;
+    });
+    if (reason) throw new Error(reason);
+    if (!res.committed || !res.snapshot.exists()) throw new Error("Room not found.");
+    await attach(code, false);
+    return code;
+  } catch (err) {
+    console.warn("[mp] joinRoom:", err);
+    throw new Error(friendly(err, "Couldn't join that room."));
+  }
+}
+
+export async function startRoomRace() {
+  const v = getRoom();
+  if (!v || !v.isHost) throw new Error("Only the host can start the race.");
+  if (v.players.length < MIN_PLAYERS) throw new Error(`Need at least ${MIN_PLAYERS} racers to start.`);
+  try {
+    // From here the room must outlive the host's connection, so drop the
+    // "close room on disconnect" hook (cancel() clears children too, so
+    // re-register this player's own cleanup right after).
+    await fb.onDisconnect(room.roomRef).cancel();
+    await fb.onDisconnect(room.playerRef).remove();
+    await fb.update(room.roomRef, { status: "racing", raceStartAt: serverNow() + START_DELAY_MS });
+  } catch (err) {
+    console.warn("[mp] startRoomRace:", err);
+    throw new Error(friendly(err, "Couldn't start the race."));
+  }
+}
+
+export async function leaveRoom() {
+  if (!room) return;
+  const { roomRef, playerRef, isHost, view } = room;
+  detach();
+  try {
+    await fb.onDisconnect(roomRef).cancel();
+    if (isHost && (!view || view.status === "waiting")) await fb.remove(roomRef);
+    else await fb.remove(playerRef);
+  } catch (err) {
+    console.warn("[mp] leaveRoom:", err); // best effort; onDisconnect is the backstop
+  }
+}

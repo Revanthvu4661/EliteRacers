@@ -1,0 +1,19 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "rooms": {
+      "$code": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        ".validate": "$code.matches(/^[A-HJKMNP-Z2-9]{5}$/) && newData.hasChildren(['hostId', 'status'])",
+        "status": { ".validate": "newData.val() === 'waiting' || newData.val() === 'racing' || newData.val() === 'finished'" },
+        "players": {
+          "$uid": {
+            ".validate": "newData.hasChildren(['name', 'carId'])"
+          }
+        }
+      }
+    }
+  }
+}
