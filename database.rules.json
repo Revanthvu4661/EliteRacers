@@ -12,6 +12,11 @@
           "$uid": {
             ".validate": "newData.hasChildren(['name', 'carId'])"
           }
+        },
+        "results": {
+          "$uid": {
+            ".validate": "newData.hasChildren(['finishTimeMs', 'bestLapMs', 'totalLaps'])"
+          }
         }
       }
     }

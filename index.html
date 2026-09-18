@@ -7,7 +7,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏎️</text></svg>" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=9" />
+  <link rel="stylesheet" href="styles.css?v=10" />
 
   <!-- Import map: every module imports "three", "three/addons/..." and "cannon-es"
        by bare name. Change versions here, nowhere else. No build step. -->
@@ -124,6 +124,8 @@
       </div>
       <div class="hud-commentary" id="hud-commentary"></div>
       <div class="hud-center" id="hud-center"></div>
+      <!-- Multiplayer only: live standings, populated by main.js's computeLeaderboard(). -->
+      <div class="hud-leaderboard" id="hud-leaderboard" hidden></div>
     </div>
     <button id="btn-quit" class="btn btn-small btn-ghost hud-quit">Quit</button>
   </section>
@@ -134,6 +136,11 @@
       <h2 class="results-title">RACE COMPLETE</h2>
       <p class="results-name" id="results-name"></p>
       <ul class="results-laps" id="results-laps"></ul>
+      <!-- Multiplayer only: shared standings from /rooms/{code}/results. -->
+      <div class="results-mp" id="results-mp" hidden>
+        <p class="results-mp-head">RACE RESULTS</p>
+        <ol class="results-mp-list" id="results-mp-list"></ol>
+      </div>
       <div class="results-actions">
         <button id="btn-again" class="btn btn-primary">Play Again</button>
         <button id="btn-change-car" class="btn btn-ghost">Change Car</button>
@@ -150,6 +157,6 @@
   <!-- Toasts (errors, notices) -->
   <div id="toast-root"></div>
 
-  <script type="module" src="main.js?v=9"></script>
+  <script type="module" src="main.js?v=10"></script>
 </body>
 </html>

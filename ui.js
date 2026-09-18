@@ -172,6 +172,30 @@ export function showCommentary(text, ms = 4000) {
   commentaryTimer = setTimeout(() => el.classList.remove("show"), ms);
 }
 
+/**
+ * In-race live standings (multiplayer only). entries: sorted array of
+ * { uid, name, isMe, lap, dist } from main.js's computeLeaderboard(), or null
+ * to hide it (solo races, or once the race screen is left).
+ */
+export function renderLeaderboard(entries) {
+  const el = $("#hud-leaderboard");
+  el.innerHTML = "";
+  if (!entries || entries.length === 0) { el.hidden = true; return; }
+  el.hidden = false;
+  entries.forEach((p, i) => {
+    const row = document.createElement("div");
+    row.className = "lb-row" + (p.isMe ? " me" : "");
+    const rank = document.createElement("span");
+    rank.className = "lb-rank";
+    rank.textContent = i + 1;
+    const name = document.createElement("span");
+    name.className = "lb-name";
+    name.textContent = p.name; // player-supplied - textContent only, never innerHTML
+    row.append(rank, name);
+    el.appendChild(row);
+  });
+}
+
 export function setHudCenter(text) {
   const el = $("#hud-center");
   if (el.textContent !== (text || "")) {
@@ -205,6 +229,43 @@ export function renderResults(player, lapTimes) {
   total.className = "total";
   total.innerHTML = `<span>Total</span><span>${formatTime(lapTimes.reduce((a, b) => a + b, 0))}</span>`;
   list.appendChild(total);
+}
+
+/**
+ * Multiplayer results table on the results screen. entries: sorted ascending
+ * by finishTimeMs, from main.js's computeResultsBoard() - [{ uid, name, isMe,
+ * finishTimeMs, bestLapMs, totalLaps }]. Pass null/empty to hide the section
+ * (solo races). Fills in incrementally as stragglers finish - callers just
+ * re-call this with a longer/updated list, no separate "waiting" state needed.
+ */
+export function renderMultiplayerBoard(entries) {
+  const section = $("#results-mp");
+  const list = $("#results-mp-list");
+  list.innerHTML = "";
+  if (!entries) { section.hidden = true; return; }
+  section.hidden = false;
+  if (entries.length === 0) {
+    const li = document.createElement("li");
+    li.className = "empty";
+    li.textContent = "Waiting for racers to finish...";
+    list.appendChild(li);
+    return;
+  }
+  entries.forEach((p, i) => {
+    const li = document.createElement("li");
+    if (p.isMe) li.classList.add("me");
+    const rank = document.createElement("span");
+    rank.className = "mp-rank";
+    rank.textContent = i + 1;
+    const name = document.createElement("span");
+    name.className = "mp-name";
+    name.textContent = p.name;
+    const time = document.createElement("span");
+    time.className = "mp-time";
+    time.textContent = formatTime(p.finishTimeMs);
+    li.append(rank, name, time);
+    list.appendChild(li);
+  });
 }
 
 export function formatTime(ms) {

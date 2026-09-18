@@ -9,18 +9,29 @@
 //   onRoomChange(fn)             -> fn(view | null, reason?) on every room update
 //   getRoom()                    -> current view or null
 //   serverToLocalTime(ms)        -> converts a server timestamp to local Date.now() time
+//   writeMyState(snapshot)       -> throttled (~12Hz), fire-and-forget in-race telemetry write
+//   writeMyResult(result)        -> one-shot write when the local player finishes
 //
 // profile = { name, carId }
 //
 // Data layout (/rooms/{code}):
 //   { hostId, status: "waiting"|"racing"|"finished", createdAt, raceStartAt,
-//     players: { <uid>: { name, carId, position, quaternion, speed, lap, finished, joinedAt } } }
+//     players: { <uid>: { name, carId, position, quaternion, speed, lap, finished, joinedAt,
+//                          state?: { position, quaternion, speedKmh, currentLap,
+//                                    currentCheckpoint, trackDistance, updatedAt } } },
+//     results?: { <uid>: { finishTimeMs, bestLapMs, totalLaps, finishedAt } } }
+//
+// `players/{uid}` (identity: name/carId/joinedAt) is written once on join and rarely
+// after. `players/{uid}/state` (position/lap/etc) is written ~12x/sec while racing -
+// kept as its own nested object so the two write patterns don't fight each other, and
+// so the single room-level onValue listener below is enough to drive both the lobby
+// list and, later, remote-car rendering + the leaderboard - no second listener needed.
 //
 // Degrades gracefully: the SDK loads lazily, connecting has a timeout, and any
 // failure surfaces as a message so the UI can offer solo play instead.
 // ============================================================================
 
-import { getFirebaseApp, ensureFirebaseUid } from "./auth.js?v=9";
+import { getFirebaseApp, ensureFirebaseUid } from "./auth.js?v=10";
 
 const SDK_URL = "https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js";
 
@@ -121,7 +132,7 @@ function playerNode(profile) {
 function buildView(code, data) {
   const players = Object.entries(data.players || {})
     .map(([id, p]) => ({ uid: id, name: p.name, carId: p.carId, joinedAt: p.joinedAt || 0,
-                         isHost: id === data.hostId, isMe: id === uid }))
+                         isHost: id === data.hostId, isMe: id === uid, state: p.state || null }))
     .sort((a, b) => a.joinedAt - b.joinedAt);
   return {
     code,
@@ -131,6 +142,7 @@ function buildView(code, data) {
     hostPresent: players.some((p) => p.isHost),
     raceStartAt: data.raceStartAt || null,
     players,
+    results: data.results || null,
     raw: data,
   };
 }
@@ -255,6 +267,8 @@ export async function leaveRoom() {
   if (!room) return;
   const { roomRef, playerRef, isHost, view } = room;
   detach();
+  lastStateAt = 0;
+  lastStateKey = null;
   try {
     await fb.onDisconnect(roomRef).cancel();
     if (isHost && (!view || view.status === "waiting")) await fb.remove(roomRef);
@@ -262,4 +276,64 @@ export async function leaveRoom() {
   } catch (err) {
     console.warn("[mp] leaveRoom:", err); // best effort; onDisconnect is the backstop
   }
+}
+
+// ---------------------------------------------------------------------------
+// In-race telemetry (Task 1). Not part of the lobby/join flow above - purely
+// additive writes into players/{uid}/state, picked up by the same room
+// listener `attach()` already subscribes with.
+// ---------------------------------------------------------------------------
+
+const STATE_INTERVAL_MS = 80; // ~12.5 Hz - within the asked 10-15Hz / 65-100ms range
+const r2 = (n) => Math.round((n || 0) * 100) / 100;
+const r3 = (n) => Math.round((n || 0) * 1000) / 1000;
+
+let lastStateAt = 0;
+let lastStateKey = null; // cheap dirty-check: skip the write if nothing changed
+
+/**
+ * Throttled, fire-and-forget write of the local player's live race telemetry.
+ * No-op when not in a room. Safe to call every render frame - it self-throttles
+ * and skips the network write entirely when the rounded snapshot is unchanged
+ * since the last sent tick (e.g. car sitting still during the countdown).
+ *
+ * snapshot = { position:{x,y,z}, quaternion:{x,y,z,w}, speedKmh, currentLap,
+ *              currentCheckpoint, trackDistance }
+ */
+export function writeMyState(snapshot) {
+  if (!room || !fb) return;
+  const now = performance.now();
+  if (now - lastStateAt < STATE_INTERVAL_MS) return;
+
+  const rounded = {
+    position: { x: r2(snapshot.position.x), y: r2(snapshot.position.y), z: r2(snapshot.position.z) },
+    quaternion: {
+      x: r3(snapshot.quaternion.x), y: r3(snapshot.quaternion.y),
+      z: r3(snapshot.quaternion.z), w: r3(snapshot.quaternion.w),
+    },
+    speedKmh: Math.round(snapshot.speedKmh || 0),
+    currentLap: snapshot.currentLap || 0,
+    currentCheckpoint: snapshot.currentCheckpoint || 0,
+    trackDistance: r2(snapshot.trackDistance || 0),
+  };
+  const key = JSON.stringify(rounded);
+  if (key === lastStateKey) return; // nothing meaningfully changed - skip the write
+  lastStateAt = now;
+  lastStateKey = key;
+
+  const myRoom = room;
+  fb.set(fb.ref(db, `rooms/${myRoom.code}/players/${uid}/state`), { ...rounded, updatedAt: serverNow() })
+    .catch((err) => console.warn("[mp] state write failed:", err));
+}
+
+/** One-shot write when the local player finishes all laps. Fire-and-forget. */
+export function writeMyResult(result) {
+  if (!room || !fb) return;
+  const myRoom = room;
+  fb.set(fb.ref(db, `rooms/${myRoom.code}/results/${uid}`), {
+    finishTimeMs: Math.round(result.finishTimeMs),
+    bestLapMs: Math.round(result.bestLapMs),
+    totalLaps: result.totalLaps,
+    finishedAt: serverNow(),
+  }).catch((err) => console.warn("[mp] result write failed:", err));
 }

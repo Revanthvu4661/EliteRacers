@@ -13,28 +13,43 @@
 import * as THREE from "three";
 import * as CANNON from "cannon-es";
 
+// Larger-track pass: TRACK_POINTS and every size below are scaled by SCALE (2.2x,
+// within the asked 2-2.5x range) from the original circuit, uniformly - same shape,
+// same corner-radii logic (untouched), just bigger. width/barrierOffset/curb size
+// scale by the same factor so the road doesn't look like a thread lost in a huge
+// landscape at the new scale. bounds + sky radius + fog near/far (see buildTrack
+// below) and the camera far-plane (main.js) are scaled by the same factor too, which
+// preserves the exact same edge-of-world/fog-falloff ratios the original had -
+// whatever was already comfortably hidden stays comfortably hidden at the new size.
+const SCALE = 2.2;
+
 export const TRACK_CONFIG = {
-  width: 16,            // road width (m). Widened from 12: even well-tuned fixed-angle
-                         // keyboard steering can't exactly track a continuously-varying
-                         // curve, so a bit more room for a slightly-off line before it
-                         // counts as "off the asphalt" makes normal driving far more
-                         // forgiving without touching how the car itself handles.
+  width: Math.round(16 * SCALE),            // road width (m). Widened from 12 originally: even
+                         // well-tuned fixed-angle keyboard steering can't exactly track a
+                         // continuously-varying curve, so a bit more room for a slightly-off
+                         // line before it counts as "off the asphalt" makes normal driving
+                         // far more forgiving without touching how the car itself handles.
   laps: 3,
-  checkpoints: 4,       // gates spread evenly along the loop (index 0 = start/finish)
-  samples: 420,         // ribbon resolution
-  curbSpacing: 2.6,     // m between curb blocks
-  barrierSpacing: 4.0,  // m between barrier segments
-  barrierOffset: 6,     // m from road edge to barrier centre (was 4.5) - more grass
+  checkpoints: 4,       // gates spread evenly along the loop (index 0 = start/finish) -
+                         // c/checkpoints stays a fraction of the loop, so this stays evenly
+                         // distributed automatically as the spline gets bigger.
+  samples: 420,         // ribbon resolution (unchanged - not a "size", corner-radii logic
+                         // untouched per spec; sampling density scales with the track for free)
+  curbSpacing: +(2.6 * SCALE).toFixed(2),     // m between curb blocks
+  barrierSpacing: +(4.0 * SCALE).toFixed(2),  // m between barrier segments
+  barrierOffset: Math.round(6 * SCALE),  // m from road edge to barrier centre - more grass
                          // shoulder to run through before hitting a hard collision
-  treeCount: 170,
-  bounds: 340,          // half-size of grass plane
+  treeCount: 260,        // grown for the bigger play area, short of a full area-scale
+                         // (170 * SCALE^2 would be ~820) to keep the instanced draw count sane
+  bounds: Math.round(340 * SCALE),          // half-size of grass plane
 };
 
-// Control points of the centreline (x, z). y is 0 everywhere. Closed loop.
+// Control points of the centreline (x, z), scaled SCALE x from the original circuit.
+// y is 0 everywhere. Closed loop.
 export const TRACK_POINTS = [
   [-60, 0], [60, 0], [130, -25], [155, -90], [115, -150], [45, -120],
   [-15, -160], [-100, -140], [-150, -70], [-135, 10], [-105, 32],
-];
+].map(([x, z]) => [x * SCALE, z * SCALE]);
 
 const Y_UP = new THREE.Vector3(0, 1, 0);
 
@@ -109,7 +124,7 @@ function checkerTexture(cols = 12, rows = 3) {
 // Sky dome: vertex-gradient shader on an inverted sphere.
 // ---------------------------------------------------------------------------
 function makeSky() {
-  const geo = new THREE.SphereGeometry(1400, 32, 16);
+  const geo = new THREE.SphereGeometry(1400 * SCALE, 32, 16);
   const mat = new THREE.ShaderMaterial({
     side: THREE.BackSide,
     depthWrite: false,
@@ -172,7 +187,7 @@ export function buildTrack(scene, world) {
   // --- Sky + fog + lights ---------------------------------------------------
   scene.add(makeSky());
   scene.background = new THREE.Color(0xdfe9f3);
-  scene.fog = new THREE.Fog(0xdfe9f3, 180, 900);
+  scene.fog = new THREE.Fog(0xdfe9f3, 180 * SCALE, 900 * SCALE);
 
   scene.add(new THREE.HemisphereLight(0xbfd8ff, 0x3f6b2a, 0.55));
   const sun = new THREE.DirectionalLight(0xfff2dc, 2.4);
@@ -243,7 +258,7 @@ export function buildTrack(scene, world) {
 
   // --- Curbs (instanced, alternating red/white) -----------------------------
   {
-    const geo = new THREE.BoxGeometry(cfg.curbSpacing * 0.98, 0.14, 0.9);
+    const geo = new THREE.BoxGeometry(cfg.curbSpacing * 0.98, 0.14, 0.9 * SCALE);
     const count = Math.floor(length / cfg.curbSpacing);
     const red = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ color: 0xd8262a, roughness: 0.6 }), count);
     const white = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.6 }), count);

@@ -11,15 +11,15 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=9";
-import * as ui from "./ui.js?v=9";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=9";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=9";
-import { buildTrack, TRACK_CONFIG } from "./track.js?v=9";
-import { createCameraRig } from "./camera.js?v=9";
-import { loadCarModel, assembleStatic, preloadCarAssets } from "./car-model.js?v=9";
-import { commentate } from "./ai-commentary.js?v=9";
-import * as mp from "./multiplayer.js?v=9";
+import * as auth from "./auth.js?v=10";
+import * as ui from "./ui.js?v=10";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=10";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=10";
+import { buildTrack, TRACK_CONFIG } from "./track.js?v=10";
+import { createCameraRig } from "./camera.js?v=10";
+import { loadCarModel, assembleStatic, preloadCarAssets } from "./car-model.js?v=10";
+import { commentate } from "./ai-commentary.js?v=10";
+import * as mp from "./multiplayer.js?v=10";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera
@@ -33,7 +33,9 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 
-const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 3000);
+// Far-plane must clear the sky dome radius (track.js, scaled with the track) with
+// margin, or the dome itself gets clipped at the horizon.
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 4000);
 
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -141,6 +143,145 @@ function buildCarRig(model) {
 }
 
 // ---------------------------------------------------------------------------
+// Remote cars (multiplayer) - visual-only puppets driven by RTDB state, no
+// physics. Position/quaternion are interpolated toward the latest network
+// sample over REMOTE_LERP_MS to hide the ~80ms gap between writeMyState() ticks.
+// ---------------------------------------------------------------------------
+const remotes = new Map(); // uid -> puppet
+const knownNames = new Map(); // uid -> name, survives a player's own node being removed
+const REMOTE_LERP_MS = 120;
+
+function makeNameSprite(text) {
+  const c = document.createElement("canvas");
+  c.width = 256; c.height = 64;
+  const g = c.getContext("2d");
+  g.font = "700 30px Inter, system-ui, sans-serif";
+  const textW = g.measureText(text).width;
+  const boxW = Math.min(236, textW + 28);
+  g.fillStyle = "rgba(7,8,12,0.72)";
+  g.fillRect(128 - boxW / 2, 14, boxW, 36);
+  g.fillStyle = "#f2f4f8";
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  g.fillText(text, 128, 33, boxW - 12);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true }));
+  sprite.scale.set(2.4, 0.6, 1);
+  sprite.position.set(0, 2.1, 0);
+  return sprite;
+}
+
+/** Same model-frame -> chassis-frame convention as buildCarRig, but static
+ *  (no wheel articulation - remote cars are visual puppets, not simulated). */
+function buildRemoteRig(model, name) {
+  const root = new THREE.Group();
+  const bodyPivot = new THREE.Group();
+  bodyPivot.rotation.y = -Math.PI / 2;
+  bodyPivot.add(assembleStatic(model));
+  root.add(bodyPivot);
+  root.add(makeNameSprite(name));
+  return root;
+}
+
+function disposePuppet(root) {
+  root.traverse((o) => {
+    if (o.isMesh && o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose());
+    if (o.isSprite) { o.material.map?.dispose(); o.material.dispose(); }
+  });
+}
+
+/** Create (if needed) a loading placeholder for uid; the model loads async and
+ *  the puppet becomes visible once both the model is ready AND a first state
+ *  update has arrived (so it never flashes at the world origin). */
+function ensureRemotePuppet(uid, name, carId) {
+  let r = remotes.get(uid);
+  if (r) return r;
+  r = {
+    root: null, carId,
+    from: { p: new THREE.Vector3(), q: new THREE.Quaternion() },
+    to: { p: new THREE.Vector3(), q: new THREE.Quaternion() },
+    tStart: performance.now(), hasState: false,
+  };
+  remotes.set(uid, r);
+  loadCarModel(getCar(carId)).then((model) => {
+    if (remotes.get(uid) !== r) return; // removed (or replaced) while the model was loading
+    r.root = buildRemoteRig(model, name);
+    r.root.visible = r.hasState;
+    if (r.hasState) { r.root.position.copy(r.to.p); r.root.quaternion.copy(r.to.q); }
+    raceScene.add(r.root);
+  });
+  return r;
+}
+
+/** Feed a fresh network sample: capture the current interpolated pose as the
+ *  new lerp start so a burst of updates never makes the puppet jump backwards. */
+function applyRemoteState(r, netState) {
+  if (r.root) {
+    const alpha = Math.min(1, (performance.now() - r.tStart) / REMOTE_LERP_MS);
+    r.from.p.lerpVectors(r.from.p, r.to.p, alpha);
+    r.from.q.slerp(r.to.q, alpha);
+  }
+  r.to.p.set(netState.position.x, netState.position.y, netState.position.z);
+  r.to.q.set(netState.quaternion.x, netState.quaternion.y, netState.quaternion.z, netState.quaternion.w);
+  r.tStart = performance.now();
+  r.hasState = true;
+  if (r.root) r.root.visible = true;
+}
+
+function removeRemotePuppet(uid) {
+  const r = remotes.get(uid);
+  if (!r) return;
+  remotes.delete(uid);
+  if (r.root) { raceScene.remove(r.root); disposePuppet(r.root); }
+}
+
+/** Called from every room update while state.screen === "race": builds/updates/
+ *  removes puppets for every OTHER player currently in the room. Symmetric by
+ *  construction - runs identically on the host's and every guest's client, each
+ *  filtering out only their own uid, so each side puppets everyone else. */
+function updateRemotesFromView(view) {
+  const seen = new Set();
+  for (const p of view.players) {
+    if (p.isMe) continue;
+    seen.add(p.uid);
+    const r = ensureRemotePuppet(p.uid, p.name, p.carId);
+    if (p.state) applyRemoteState(r, p.state);
+  }
+  for (const uid of [...remotes.keys()]) if (!seen.has(uid)) removeRemotePuppet(uid);
+}
+
+function clearRemotes() {
+  for (const uid of [...remotes.keys()]) removeRemotePuppet(uid);
+}
+
+/** Advance every remote puppet's interpolation. Called once per rendered race frame. */
+function tickRemotes() {
+  const now = performance.now();
+  for (const r of remotes.values()) {
+    if (!r.root || !r.hasState) continue;
+    const alpha = Math.min(1, (now - r.tStart) / REMOTE_LERP_MS);
+    r.root.position.lerpVectors(r.from.p, r.to.p, alpha);
+    r.root.quaternion.slerpQuaternions(r.from.q, r.to.q, alpha);
+  }
+}
+
+/** (currentLap desc, trackDistance desc) - lap alone ties everyone mid-lap. */
+function computeLeaderboard(view) {
+  return view.players
+    .map((p) => ({ uid: p.uid, name: p.name, isMe: p.isMe, lap: p.state?.currentLap || 0, dist: p.state?.trackDistance || 0 }))
+    .sort((a, b) => (b.lap - a.lap) || (b.dist - a.dist));
+}
+
+function computeResultsBoard(view) {
+  if (!view || !view.results) return [];
+  const myUid = mp.getUid();
+  return Object.entries(view.results)
+    .map(([uid, r]) => ({ uid, isMe: uid === myUid, name: knownNames.get(uid) || "Racer", ...r }))
+    .sort((a, b) => a.finishTimeMs - b.finishTimeMs);
+}
+
+// ---------------------------------------------------------------------------
 // App state + input
 // ---------------------------------------------------------------------------
 const state = {
@@ -149,6 +290,7 @@ const state = {
   carId: DEFAULT_CAR_ID,
   race: null,
   mpStartAt: null,   // local Date.now() time the next online race's countdown ends
+  lastRaceOnline: false, // was the just-finished race online? (drives the results screen)
 };
 
 const keys = new Set();
@@ -352,26 +494,47 @@ mp.onRoomChange((view, reason) => {
     if (state.screen === "lobby") {
       ui.showLobbyPanel("menu");
       ui.setStatus("lobby-status", reason, "warn");
+    } else if (state.screen === "race") {
+      // Room gone mid-race (host closed it, or we got disconnected) - the local
+      // race keeps running on its own physics either way, just drop the puppets
+      // and leaderboard rather than leaving stale cars/ranks on screen.
+      clearRemotes();
+      ui.renderLeaderboard(null);
+      if (reason) ui.toast(reason, "warn");
     } else if (reason) {
       ui.toast(reason, "warn");
     }
     return;
   }
-  if (state.screen !== "lobby") return;
 
-  ui.renderRoom(view, getCar, mp.MAX_PLAYERS, mp.MIN_PLAYERS);
-  if (view.status === "racing" && view.raceStartAt) {
-    // Everyone counts down to the same server timestamp, not to when the
-    // "go" message happened to arrive.
-    state.mpStartAt = mp.serverToLocalTime(view.raceStartAt);
-    goTo("race");
+  for (const p of view.players) knownNames.set(p.uid, p.name);
+
+  if (state.screen === "lobby") {
+    ui.renderRoom(view, getCar, mp.MAX_PLAYERS, mp.MIN_PLAYERS);
+    if (view.status === "racing" && view.raceStartAt) {
+      // Everyone counts down to the same server timestamp, not to when the
+      // "go" message happened to arrive.
+      state.mpStartAt = mp.serverToLocalTime(view.raceStartAt);
+      goTo("race");
+      return;
+    }
+    const short = view.players.length < mp.MIN_PLAYERS;
+    ui.setStatus("room-status",
+      view.isHost
+        ? (short ? "Read the code out - need at least 2 racers." : "Ready when you are.")
+        : "Waiting for the host to start...");
     return;
   }
-  const short = view.players.length < mp.MIN_PLAYERS;
-  ui.setStatus("room-status",
-    view.isHost
-      ? (short ? "Read the code out - need at least 2 racers." : "Ready when you are.")
-      : "Waiting for the host to start...");
+
+  if (state.screen === "race" && state.race?.online) {
+    updateRemotesFromView(view);
+    ui.renderLeaderboard(computeLeaderboard(view));
+    return;
+  }
+
+  if (state.screen === "results" && state.lastRaceOnline) {
+    ui.renderMultiplayerBoard(computeResultsBoard(view));
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -407,11 +570,13 @@ async function startRace() {
   raceScene.add(rig.root);
   world.addEventListener("postStep", syncWheelVisuals);
 
+  const online = !!mp.getRoom();
   const pose = t.startPose(7);
   veh.reset(pose.position, pose.yaw);
 
   state.race = {
     ready: true,
+    online,
     phase: "countdown",
     countdownEnd: countdownEndTime(),
     startedAt: 0,
@@ -424,6 +589,7 @@ async function startRace() {
     upsideDownFor: 0,
     lastDriftLineAt: 0,
   };
+  if (online) { ui.renderLeaderboard(computeLeaderboard(mp.getRoom())); }
   syncChassisVisual();
   syncWheelVisuals();
   cameraRig.reset();
@@ -443,6 +609,8 @@ function countdownEndTime() {
 
 function teardownRace() {
   const r = state.race;
+  clearRemotes();
+  ui.renderLeaderboard(null);
   if (!r) return;
   world.removeEventListener("postStep", syncWheelVisuals);
   if (r.veh) r.veh.dispose();
@@ -454,8 +622,14 @@ function finishRace() {
   const r = state.race;
   if (!r) return;
   const laps = r.lapTimes.slice();
+  const online = r.online;
+  const roomBeforeTeardown = online ? mp.getRoom() : null;
   teardownRace();
+  state.lastRaceOnline = online;
   ui.renderResults(state.player, laps);
+  // Populate immediately from the cached room (don't wait for the next network
+  // event) - onRoomChange keeps it live-updating as stragglers finish after this.
+  ui.renderMultiplayerBoard(online ? computeResultsBoard(roomBeforeTeardown) : null);
   goTo("results");
 }
 
@@ -574,6 +748,20 @@ function updateRace(dt) {
   ui.setHudSpeed(kmh);
   if (r.phase === "racing") ui.setHudTime(now - r.lapStartedAt);
 
+  // Multiplayer: push our own telemetry (throttled/dirty-checked inside
+  // writeMyState itself), advance remote puppets toward their latest samples.
+  if (r.online) {
+    mp.writeMyState({
+      position: body.position,
+      quaternion: body.quaternion,
+      speedKmh: kmh,
+      currentLap: r.lap,
+      currentCheckpoint: r.nextCp,
+      trackDistance: near.sample.u * t.length,
+    });
+  }
+  tickRemotes();
+
   // Drift commentary
   if (r.phase === "racing" && input.handbrake && kmh > 45 && now - r.lastDriftLineAt > 9000) {
     r.lastDriftLineAt = now;
@@ -609,6 +797,13 @@ function onCheckpoint(i) {
       r.phase = "finished";
       ui.setHudCenter("FINISH");
       commentate("race_finish").then((line) => line && ui.showCommentary(line));
+      if (r.online) {
+        mp.writeMyResult({
+          finishTimeMs: r.lapTimes.reduce((a, b) => a + b, 0),
+          bestLapMs: Math.min(...r.lapTimes),
+          totalLaps: r.lapTimes.length,
+        });
+      }
       setTimeout(() => { if (state.race === r) finishRace(); }, 2200);
       return;
     }
@@ -626,9 +821,14 @@ function goTo(screen) {
   if (screen !== "login" && !state.player) screen = "login";
   if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
   if (state.screen === "race" && screen !== "race") teardownRace();
-  // Anywhere but the lobby or an online race means we've left the room.
+  // Keep the room while: in the lobby, about to start a synced online race,
+  // mid-race in one, or watching a just-finished online race's results (so the
+  // shared leaderboard/results keep live-updating). Leave it anywhere else.
+  const wantsRoom = screen === "lobby"
+    || (screen === "race" && (state.mpStartAt != null || (state.race && state.race.online)))
+    || (screen === "results" && state.lastRaceOnline);
   if (screen !== "race") state.mpStartAt = null;
-  if (mp.getRoom() && screen !== "lobby" && !(screen === "race" && state.mpStartAt != null)) mp.leaveRoom();
+  if (mp.getRoom() && !wantsRoom) mp.leaveRoom();
   state.screen = ui.showScreen(screen);
   keys.clear();
   if (screen === "select") renderCarCards();
@@ -661,7 +861,7 @@ function frame() {
 // Boot
 // ---------------------------------------------------------------------------
 // Dev handle for the console / automated checks (harmless in the demo).
-window.ER = { state, cameraRig, TUNING, keys, camera, THREE };
+window.ER = { state, cameraRig, TUNING, keys, camera, THREE, mp, remotes, computeLeaderboard, computeResultsBoard };
 
 preloadCarAssets();
 setShowcaseCar(getCar(state.carId));
