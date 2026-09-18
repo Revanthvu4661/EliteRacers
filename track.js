@@ -368,7 +368,8 @@ export function buildTrack(scene, world) {
   for (let c = 0; c < cfg.checkpoints; c++) {
     const s = sampleAt(c / cfg.checkpoints);
     checkpoints.push({ position: s.p.clone(), tangent: s.t.clone(), normal: s.n.clone(), halfWidth: hw + 1.5 });
-    group.add(makeGate(s, hw, c === 0));
+    // Start/finish gets the big checkered gantry (Task 6) instead of a plain gate.
+    group.add(c === 0 ? makeFinishGantry(s, hw) : makeGate(s, hw, false));
   }
   {
     const s = samples[0];
@@ -444,6 +445,65 @@ function makeGate(s, hw, isStart) {
   g.add(beam);
   g.position.set(s.p.x, 0, s.p.z);
   g.rotation.y = s.yaw + Math.PI / 2; // gate spans across the track
+  return g;
+}
+
+// ---------------------------------------------------------------------------
+// Finish gantry (Task 6): visual only - no physics bodies. Two heavy towers, a tall
+// banner (checkered strips + red FINISH band, one canvas texture) and a checkered
+// flag on each tower. Deliberately unlike the slim pole-and-beam checkpoint gates.
+// ---------------------------------------------------------------------------
+function finishBannerTexture() {
+  const W = 1024, H = 256, strip = 48;
+  const c = makeCanvas(W, H);
+  const g = c.getContext("2d");
+  g.fillStyle = "#c8102e";
+  g.fillRect(0, 0, W, H);
+  const cell = strip / 2;
+  for (let x = 0; x < W / cell; x++) for (let y = 0; y < 2; y++) {
+    g.fillStyle = (x + y) % 2 ? "#111111" : "#f4f4f4";
+    g.fillRect(x * cell, y * cell, cell, cell);
+    g.fillRect(x * cell, H - strip + y * cell, cell, cell);
+  }
+  g.fillStyle = "#ffffff";
+  g.font = "900 130px Orbitron, Impact, system-ui, sans-serif";
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  g.fillText("FINISH", W / 2, H / 2 + 6);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+function makeFinishGantry(s, hw) {
+  const g = new THREE.Group();
+  const span = hw + 2.8;
+  const towerH = 13;
+  const towerMat = new THREE.MeshStandardMaterial({ color: 0x1c1f28, roughness: 0.55, metalness: 0.5 });
+  const bannerTex = finishBannerTexture();
+  const bannerMat = new THREE.MeshStandardMaterial({ map: bannerTex, roughness: 0.7 });
+  // Back face would read mirrored - same canvas, flipped horizontally.
+  const backTex = bannerTex.clone(); backTex.wrapS = THREE.RepeatWrapping; backTex.repeat.x = -1; backTex.offset.x = 1; backTex.needsUpdate = true;
+  const bannerBackMat = new THREE.MeshStandardMaterial({ map: backTex, roughness: 0.7 });
+  const flagMat = new THREE.MeshStandardMaterial({ map: checkerTexture(8, 5), roughness: 0.8, side: THREE.DoubleSide });
+  for (const side of [1, -1]) {
+    const tower = new THREE.Mesh(new THREE.BoxGeometry(1.6, towerH, 1.6), towerMat);
+    tower.position.set(side * span, towerH / 2, 0);
+    tower.castShadow = true;
+    g.add(tower);
+    const flag = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 2), flagMat);
+    flag.position.set(side * span, towerH + 1.1, 0.9);
+    flag.rotation.y = Math.PI / 2;
+    g.add(flag);
+  }
+  // Banner faces along the track (both ways): a thin box with the texture on both broad faces.
+  const banner = new THREE.Mesh(new THREE.BoxGeometry(span * 2 + 1.6, 3.6, 0.5), [towerMat, towerMat, towerMat, towerMat, bannerBackMat, bannerMat]);
+  banner.position.y = towerH - 2.2;
+  banner.castShadow = true;
+  g.add(banner);
+  g.position.set(s.p.x, 0, s.p.z);
+  g.rotation.y = s.yaw + Math.PI / 2; // spans across the track, same convention as makeGate
   return g;
 }
 

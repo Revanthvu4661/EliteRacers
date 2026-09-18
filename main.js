@@ -11,18 +11,18 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=21";
-import * as ui from "./ui.js?v=21";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=21";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=21";
-import { buildTrack, TRACK_CONFIG } from "./track.js?v=21";
-import { createCameraRig } from "./camera.js?v=21";
-import { loadCarModel, assembleStatic, preloadCarAssets } from "./car-model.js?v=21";
-import { commentate } from "./ai-commentary.js?v=21";
-import * as mp from "./multiplayer.js?v=21";
-import { createPickups } from "./pickups.js?v=21";
-import { createMinimap } from "./minimap.js?v=21";
-import { createSpeedometer } from "./speedometer.js?v=21";
+import * as auth from "./auth.js?v=24";
+import * as ui from "./ui.js?v=24";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=24";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=24";
+import { buildTrack, TRACK_CONFIG } from "./track.js?v=24";
+import { createCameraRig } from "./camera.js?v=24";
+import { loadCarModel, assembleStatic, preloadCarAssets } from "./car-model.js?v=24";
+import { commentate } from "./ai-commentary.js?v=24";
+import * as mp from "./multiplayer.js?v=24";
+import { createPickups } from "./pickups.js?v=24";
+import { createMinimap } from "./minimap.js?v=24";
+import { createSpeedometer } from "./speedometer.js?v=24";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera
