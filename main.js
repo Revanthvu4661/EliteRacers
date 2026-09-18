@@ -11,17 +11,18 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=17";
-import * as ui from "./ui.js?v=17";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=17";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=17";
-import { buildTrack, TRACK_CONFIG } from "./track.js?v=17";
-import { createCameraRig } from "./camera.js?v=17";
-import { loadCarModel, assembleStatic, preloadCarAssets } from "./car-model.js?v=17";
-import { commentate } from "./ai-commentary.js?v=17";
-import * as mp from "./multiplayer.js?v=17";
-import { createPickups } from "./pickups.js?v=17";
-import { createMinimap } from "./minimap.js?v=17";
+import * as auth from "./auth.js?v=18";
+import * as ui from "./ui.js?v=18";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=18";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=18";
+import { buildTrack, TRACK_CONFIG } from "./track.js?v=18";
+import { createCameraRig } from "./camera.js?v=18";
+import { loadCarModel, assembleStatic, preloadCarAssets } from "./car-model.js?v=18";
+import { commentate } from "./ai-commentary.js?v=18";
+import * as mp from "./multiplayer.js?v=18";
+import { createPickups } from "./pickups.js?v=18";
+import { createMinimap } from "./minimap.js?v=18";
+import { createSpeedometer } from "./speedometer.js?v=18";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera
@@ -582,6 +583,9 @@ async function startRace() {
   // pickups.js's file header for why multiplayer sync isn't wired yet.
   const pickups = createPickups(raceScene, t);
   const minimap = createMinimap(document.getElementById("minimap"), t);
+  // Analog speed gauge (speedometer.js) - visual only, guarded so it can never break a race.
+  let speedo = null;
+  try { speedo = createSpeedometer(document.getElementById("speedo"), { max: 240 }); } catch (e) { console.warn("[speedo]", e); }
 
   state.race = {
     ready: true,
@@ -594,7 +598,7 @@ async function startRace() {
     lap: 1,
     nextCp: 1,
     cpSide: t.checkpoints.map(() => 0),
-    veh, rig, track: t, carCfg, pickups, minimap,
+    veh, rig, track: t, carCfg, pickups, minimap, speedo,
     upsideDownFor: 0,
     lastDriftLineAt: 0,
     health: HEALTH_MAX,
@@ -628,6 +632,7 @@ function teardownRace() {
   if (r.veh) r.veh.dispose();
   if (r.rig) raceScene.remove(r.rig.root);
   if (r.pickups) r.pickups.dispose();
+  try { if (r.speedo) r.speedo.destroy(); } catch (_) { /* visual only */ }
   state.race = null;
 }
 
@@ -792,6 +797,7 @@ function updateRace(dt) {
   // HUD
   const kmh = r.veh.speedKmh();
   ui.setHudSpeed(kmh);
+  try { if (r.speedo) r.speedo.set(kmh); } catch (_) { /* visual only */ }
   if (r.phase === "racing") ui.setHudTime(now - r.lapStartedAt);
 
   // Multiplayer: push our own telemetry (throttled/dirty-checked inside

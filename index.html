@@ -7,7 +7,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏎️</text></svg>" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=17" />
+  <link rel="stylesheet" href="styles.css?v=18" />
 
   <!-- Import map: every module imports "three", "three/addons/..." and "cannon-es"
        by bare name. Change versions here, nowhere else. No build step. -->
@@ -117,6 +117,8 @@
       </div>
       <div class="hud-bottom-right">
         <div class="hud-speed"><span id="hud-speed">0</span><small> km/h</small></div>
+        <!-- Analog gauge (speedometer.js) replaces the text readout above (hidden in CSS). -->
+        <div id="speedo" class="hud-speedo"></div>
       </div>
       <div class="hud-bottom-left">
         <div class="hud-cam-label">CAM <span id="hud-cam">CHASE</span></div>
@@ -164,6 +166,6 @@
   <!-- Toasts (errors, notices) -->
   <div id="toast-root"></div>
 
-  <script type="module" src="main.js?v=17"></script>
+  <script type="module" src="main.js?v=18"></script>
 </body>
 </html>

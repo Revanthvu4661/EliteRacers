@@ -215,6 +215,9 @@ kbd {
 .hud-bottom-right { bottom: 24px; right: 30px; text-align: right; }
 .hud-speed { font-size: 64px; font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums; }
 .hud-speed small { font-size: 14px; color: #cfd5e3; font-family: var(--font-body); }
+/* Old text readout hidden - the analog gauge (speedometer.js) took its spot. */
+.hud-speed { display: none; }
+.hud-speedo { display: inline-block; text-shadow: none; }
 .hud-bottom-left { bottom: 24px; left: 26px; font-family: var(--font-body); }
 .hud-cam-label { font-family: var(--font-display); font-size: 13px; letter-spacing: 2px; color: #cfd5e3; }
 .hud-cam-label span { color: var(--accent-2); }
