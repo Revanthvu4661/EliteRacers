@@ -18,24 +18,26 @@ python -m http.server 8080
 ```
 Then open http://localhost:8080 — hard refresh (Ctrl+Shift+R) after code edits.
 
-## ⚠️ UNCOMMITTED WORK — read this first
+## Git status
 
-The working tree has real, tested changes that were **never committed or pushed**
-(the user hasn't asked to yet as of this handoff). `git status`/`git diff --stat`:
-`auth.js`, `index.html`, `main.js` (+102 lines), `multiplayer.js`, `physics.js`
-(+47 lines), `styles.css`, `track.js`, `ui.js` all modified; `pickups.js` and
-`minimap.js` are new, untracked files. This is everything described below from
-"Barrier-reaction bug fix" onward. **Ask the user before committing** — check first
-whether they want it committed/pushed now.
+Everything through the barrier-hit/health/pickups/minimap work is **committed and
+pushed** to [github.com/Revanthvu4661/EliteRacers](https://github.com/Revanthvu4661/EliteRacers)
+`main` (`4b2bd2b`). Working tree is otherwise clean.
 
-There are also three **untracked, unexplained asset items** in the project root:
-`2013-ferrari-458-spider/`, `2013_ferrari_458_spider.glb`, and
-`26-mustang-13.04.2021-compressed/` (contains Blender `.blend`/`.blend1` files).
-These were **not** added by any Claude session — they appeared in the working
-directory outside of tracked work, likely the user manually dropping in candidate
-car models for a future roster expansion. They are **not wired into `cars.js`** and
-`car-model.js` doesn't know about them. Don't assume they're safe to delete; ask
-the user what they're for before touching them.
+There are, however, **loose untracked `.glb` files appearing in the project root
+across sessions**, not added by any Claude session — the user appears to be
+manually collecting candidate car models (outside these sessions, likely via a
+file browser or a site like Sketchfab). As of this handoff:
+`2013_ferrari_458_spider.glb`, `2022_lamborghini_huracan_super_trofeo_evo2_carb.glb`,
+`bugatti_eb110_super_sport_1992_by_alex.ka..glb`. (Two folder-form versions of the
+Ferrari and a Mustang seen in an earlier session are gone now — presumably cleaned
+up/replaced by the loose GLB exports above.) **None of these are wired into
+`cars.js`** and `car-model.js` doesn't know about them. This looks like groundwork
+for a future car-roster expansion task — don't assume any of it is stray/safe to
+delete; ask the user before touching these files, and if a task ever asks to add
+cars from them, check for a `body`/`wheel_fl`/`wheel_fr`/`wheel_rl`/`wheel_rr`
+node-naming match per `car-model.js`'s loader contract (see its file header) before
+wiring one in, since a mismatch silently falls back to the primitive car.
 
 ## Build status
 
@@ -326,13 +328,12 @@ implemented differently either way.
    the one thing this session couldn't complete due to the browser pane going
    hidden. Should be quick: drive to 0% HP, confirm respawn + 50% heal; drive
    over a green cross, confirm HP increases.
-4. **Decide on committing the uncommitted work** (see warning at top) — ask the
-   user first.
-5. Wire Gemini commentary (key drop-in + race against `FALLBACK_AFTER_MS`).
-6. Tire smoke / engine audio (Stage 8 remainder).
-7. Figure out what the loose GLB/blend car assets in the repo root are for
-   (ask the user) before deciding whether to wire them into `cars.js` or remove them.
-8. Stop adding features in the last 3-4 hours; bug fix, polish, rehearse.
+4. Wire Gemini commentary (key drop-in + race against `FALLBACK_AFTER_MS`).
+5. Tire smoke / engine audio (Stage 8 remainder).
+6. Ask the user about the loose GLB car files appearing in the repo root (see
+   "Git status" above) — likely a future car-roster task; check the node-naming
+   contract before wiring any in.
+7. Stop adding features in the last 3-4 hours; bug fix, polish, rehearse.
 
 ## Testing notes for whoever continues
 
