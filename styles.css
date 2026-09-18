@@ -139,6 +139,12 @@ kbd {
    so the 3D hero car in the middle of the screen stays unobstructed. main.js's
    slideStrip() translates the strip so the selected card is centred. */
 #screen-select { justify-content: flex-end; }
+.car-loading {
+  position: absolute; top: 72px; left: 50%; transform: translateX(-50%); margin: 0;
+  font-family: var(--font-display); font-size: 12px; letter-spacing: 3px; color: var(--muted);
+  padding: 6px 14px; border-radius: 999px; background: rgba(7,8,12,0.6); border: 1px solid var(--panel-border);
+}
+.car-loading[hidden] { display: none; }
 .car-list {
   position: relative; display: flex; gap: 14px; flex-wrap: nowrap; justify-content: center;
   padding: 0 20px; margin-bottom: 96px;

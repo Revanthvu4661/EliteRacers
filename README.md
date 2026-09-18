@@ -71,4 +71,15 @@ Until step 2 is done the login screen disables the Google button and shows why. 
 
 ## Credits
 
-Car model: Ferrari 458 Italia by vicent091036, from the three.js examples (assets/models/ferrari.glb).
+Car models (originals in the repo root are the untouched downloads; the game loads
+Draco/WebP-optimised copies from `assets/models/`, produced with
+`@gltf-transform/cli optimize --compress draco --texture-compress webp --texture-size 1024`):
+
+| In-game car | Model | Author | Source / license |
+|---|---|---|---|
+| Fallback for every car | Ferrari 458 Italia (`assets/models/ferrari.glb`) | vicent091036 | three.js examples |
+| Viper GT | 2013 Ferrari 458 Spider (`assets/models/ferrari-458-spider.glb`, 340 KB) | TODO | TODO (link + license) |
+| Kestrel | 2022 Lamborghini Huracan Super Trofeo EVO2 (`assets/models/huracan.glb`, 2.2 MB) | TODO | TODO (link + license) |
+| Brawler | Bugatti EB110 Super Sport 1992 "by alex.ka." (`assets/models/bugatti-eb110.glb`, 1.4 MB) | alex.ka. (per file name) | TODO (link + license) |
+
+The three Sketchfab-exported GLBs are not committed until their licenses are confirmed.

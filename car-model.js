@@ -70,9 +70,22 @@ export function preloadCarAssets() {
 // ---------------------------------------------------------------------------
 
 export async function loadCarModel(carConfig) {
-  const url = carConfig.model || DEFAULT_MODEL_URL;
+  // Real car model (Task 7): on-demand, cached by loadGltfOnce; any failure (404,
+  // timeout, bad file) drops through to the tinted Ferrari below.
+  if (carConfig.model) {
+    try {
+      const [template, ferrari] = await Promise.all([
+        loadGltfOnce(carConfig.model),
+        loadGltfOnce(DEFAULT_MODEL_URL).catch(() => null),
+      ]);
+      const model = instantiateReal(template, carConfig, ferrari);
+      if (model) return model;
+    } catch (err) {
+      console.warn("[car-model] real model unavailable, using tinted Ferrari:", err?.message || err);
+    }
+  }
   try {
-    const template = await loadGltfOnce(url);
+    const template = await loadGltfOnce(DEFAULT_MODEL_URL);
     const model = instantiateGltf(template, carConfig);
     if (model) return model;
     console.warn("[car-model] GLB missing expected nodes, using primitive car");
@@ -80,6 +93,109 @@ export async function loadCarModel(carConfig) {
     console.warn("[car-model] GLB unavailable, using primitive car:", err?.message || err);
   }
   return buildCarModel(carConfig.color);
+}
+
+/** The tinted-Ferrari fallback only (never the real model). Never rejects. */
+export function loadFallbackModel(carConfig) {
+  return loadCarModel({ ...carConfig, model: null });
+}
+
+/**
+ * Race-start friendly load: resolves with the real model if it arrives within
+ * maxWaitMs, otherwise with the tinted Ferrari immediately, and calls onLate(model)
+ * once the real one does show up (caller swaps the visual). Never rejects.
+ */
+export function loadCarModelQuick(carConfig, maxWaitMs, onLate) {
+  if (!carConfig.model) return loadCarModel(carConfig);
+  const real = loadCarModel(carConfig);
+  let settled = false;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      loadFallbackModel(carConfig).then(resolve);
+      real.then((m) => { if (m && m.source === "gltf-real") onLate?.(m); }).catch(() => {});
+    }, maxWaitMs);
+    real.then((m) => { if (settled) return; settled = true; clearTimeout(timer); resolve(m); },
+              () => { if (settled) return; settled = true; clearTimeout(timer); loadFallbackModel(carConfig).then(resolve); });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Real car models (Task 7). None of the shipped GLBs use the body/wheel_* node
+// contract, so: recentre on the bounding box, scale so the long axis matches the
+// Ferrari's raw length (VISUAL_SCALE is then applied on top, exactly like the
+// Ferrari path), sit min-y on the ground, optional 180deg flip. Wheels are baked
+// into the mesh (static); the physics-facing wheel layout is copied from the
+// Ferrari so the chassis box / raycast layout - and therefore handling - are
+// identical to the tinted-Ferrari car. Nothing in physics.js changes.
+// ---------------------------------------------------------------------------
+const FALLBACK_FERRARI_LENGTH = 4.5; // m, only if the Ferrari GLB itself failed to load
+
+function ferrariWheelData(ferrariTemplate) {
+  const names = ["wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr"];
+  const nodes = names.map((n) => ferrariTemplate.getObjectByName(n));
+  if (nodes.some((n) => !n)) return null;
+  return nodes.map((node, i) => {
+    const box = new THREE.Box3().setFromObject(node);
+    return {
+      node: new THREE.Group(), // empty: the real model's own wheels are part of its body
+      position: node.position.clone(),
+      quaternion: node.quaternion.clone(),
+      radius: (box.max.y - box.min.y) / 2 || 0.36,
+      isFront: i < 2,
+      side: i % 2 === 0 ? -1 : 1,
+    };
+  });
+}
+
+function instantiateReal(template, carConfig, ferrariTemplate) {
+  const fit = carConfig.fit || {};
+  const hide = new Set(fit.hideMaterials || []);
+  const root = template.clone(true);
+  const paint = new THREE.MeshPhysicalMaterial({
+    color: carConfig.color, metalness: 0.55, roughness: 0.32, clearcoat: 1.0, clearcoatRoughness: 0.05,
+  });
+  const box = new THREE.Box3();
+  root.updateMatrixWorld(true);
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    const mname = (o.material && o.material.name) || "";
+    if (hide.has(mname)) { o.visible = false; return; }
+    o.castShadow = true;
+    o.receiveShadow = false;
+    if (carConfig.paintMaterial && mname === carConfig.paintMaterial) o.material = paint;
+    box.expandByObject(o, true);
+  });
+  if (box.isEmpty()) return null;
+  const size = box.getSize(new THREE.Vector3());
+  const centre = box.getCenter(new THREE.Vector3());
+  const length = Math.max(size.x, size.z) || 1;
+
+  let targetLength = FALLBACK_FERRARI_LENGTH;
+  if (ferrariTemplate) {
+    const fb = new THREE.Box3().setFromObject(ferrariTemplate);
+    targetLength = (fb.max.z - fb.min.z) || FALLBACK_FERRARI_LENGTH;
+  }
+  const scale = (targetLength / length) * (carConfig.scale || 1);
+
+  root.position.set(-centre.x, -box.min.y, -centre.z); // recentre, wheels on the ground
+  const orient = new THREE.Group();
+  orient.add(root);
+  if (size.x > size.z) orient.rotation.y = Math.PI / 2; // long axis onto Z (model frame faces -Z)
+  if (fit.flip) orient.rotation.y += Math.PI;
+  const fitted = new THREE.Group();
+  fitted.scale.setScalar(scale);
+  fitted.add(orient);
+
+  let wheels = ferrariTemplate ? ferrariWheelData(ferrariTemplate) : null;
+  if (!wheels) wheels = buildCarModel(carConfig.color).wheels.map((w) => ({ ...w, node: new THREE.Group() }));
+
+  const body = new THREE.Group();
+  body.name = "car-body";
+  body.scale.setScalar(VISUAL_SCALE);
+  body.add(fitted);
+  return { body, wheels, source: "gltf-real", tintDisabled: !carConfig.paintMaterial };
 }
 
 function instantiateGltf(template, carConfig) {

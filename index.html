@@ -7,7 +7,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏎️</text></svg>" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=24" />
+  <link rel="stylesheet" href="styles.css?v=27" />
 
   <!-- Import map: every module imports "three", "three/addons/..." and "cannon-es"
        by bare name. Change versions here, nowhere else. No build step. -->
@@ -59,6 +59,7 @@
         <button id="btn-signout" class="btn btn-small btn-ghost">Sign out</button>
       </span>
     </header>
+    <p id="car-loading" class="car-loading" hidden>LOADING MODEL&hellip;</p>
     <div id="car-list" class="car-list"></div>
     <footer class="bottombar">
       <button id="btn-race" class="btn btn-primary btn-wide">RACE SOLO</button>
@@ -168,6 +169,6 @@
   <!-- Toasts (errors, notices) -->
   <div id="toast-root"></div>
 
-  <script type="module" src="main.js?v=24"></script>
+  <script type="module" src="main.js?v=27"></script>
 </body>
 </html>

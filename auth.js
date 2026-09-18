@@ -22,7 +22,7 @@
 //     (venue wifi), initAuth still resolves and Demo Mode works.
 // ============================================================================
 
-import { firebaseConfig } from "./firebase-config.js?v=24";
+import { firebaseConfig } from "./firebase-config.js?v=27";
 
 const FIREBASE_VERSION = "11.10.0";
 const SDK_BASE = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;

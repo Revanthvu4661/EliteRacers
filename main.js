@@ -11,18 +11,18 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=24";
-import * as ui from "./ui.js?v=24";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=24";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=24";
-import { buildTrack, TRACK_CONFIG } from "./track.js?v=24";
-import { createCameraRig } from "./camera.js?v=24";
-import { loadCarModel, assembleStatic, preloadCarAssets } from "./car-model.js?v=24";
-import { commentate } from "./ai-commentary.js?v=24";
-import * as mp from "./multiplayer.js?v=24";
-import { createPickups } from "./pickups.js?v=24";
-import { createMinimap } from "./minimap.js?v=24";
-import { createSpeedometer } from "./speedometer.js?v=24";
+import * as auth from "./auth.js?v=27";
+import * as ui from "./ui.js?v=27";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=27";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=27";
+import { buildTrack, TRACK_CONFIG } from "./track.js?v=27";
+import { createCameraRig } from "./camera.js?v=27";
+import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=27";
+import { commentate } from "./ai-commentary.js?v=27";
+import * as mp from "./multiplayer.js?v=27";
+import { createPickups } from "./pickups.js?v=27";
+import { createMinimap } from "./minimap.js?v=27";
+import { createSpeedometer } from "./speedometer.js?v=27";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera
@@ -108,10 +108,14 @@ function fadeSwapShowcase(oldCar, newCar) {
   })();
 }
 
+const carLoadingEl = document.getElementById("car-loading");
 async function setShowcaseCar(carConfig) {
   const token = ++showcaseToken;
+  const hint = setTimeout(() => { if (token === showcaseToken) carLoadingEl.hidden = false; }, 150);
   const model = await loadCarModel(carConfig);
+  clearTimeout(hint);
   if (token !== showcaseToken) return; // a newer selection won
+  carLoadingEl.hidden = true;
   const previous = showcaseCar;
   showcaseCar = assembleStatic(model);
   showcase.add(showcaseCar);
@@ -174,6 +178,7 @@ function buildCarRig(model) {
 // sample over REMOTE_LERP_MS to hide the ~80ms gap between writeMyState() ticks.
 // ---------------------------------------------------------------------------
 const remotes = new Map(); // uid -> puppet
+const REAL_MODEL_WAIT_MS = 3000; // how long a race start waits for a real car model before using the fallback
 const knownNames = new Map(); // uid -> name, survives a player's own node being removed
 const REMOTE_LERP_MS = 120;
 
@@ -230,13 +235,17 @@ function ensureRemotePuppet(uid, name, carId) {
     tStart: performance.now(), hasState: false,
   };
   remotes.set(uid, r);
-  loadCarModel(getCar(carId)).then((model) => {
+  const attach = (model) => {
     if (remotes.get(uid) !== r) return; // removed (or replaced) while the model was loading
+    const prev = r.root;
     r.root = buildRemoteRig(model, name);
     r.root.visible = r.hasState;
     if (r.hasState) { r.root.position.copy(r.to.p); r.root.quaternion.copy(r.to.q); }
+    if (prev) { r.root.position.copy(prev.position); r.root.quaternion.copy(prev.quaternion); raceScene.remove(prev); disposePuppet(prev); }
     raceScene.add(r.root);
-  });
+  };
+  // Tinted-Ferrari fallback shows first if the real model is slow; swapped when it lands.
+  loadCarModelQuick(getCar(carId), REAL_MODEL_WAIT_MS, (late) => { try { attach(late); } catch (_) { /* visual only */ } }).then(attach);
   return r;
 }
 
@@ -599,7 +608,17 @@ async function startRace() {
   const t = ensureTrack();
   const carCfg = getCar(state.carId);
   ui.setLoading("Loading car...");
-  const model = await loadCarModel(carCfg);
+  // Never let a slow model download hold the start: fallback after REAL_MODEL_WAIT_MS,
+  // and swap the real body in (wheels are baked into it, so hide the Ferrari's) later.
+  const model = await loadCarModelQuick(carCfg, REAL_MODEL_WAIT_MS, (late) => {
+    try {
+      const rr = state.race;
+      if (!rr || rr.carCfg !== carCfg || !rr.rig) return;
+      rr.rig.bodyPivot.clear();
+      rr.rig.bodyPivot.add(late.body);
+      rr.rig.wheels.forEach((w) => { w.node.visible = false; });
+    } catch (_) { /* visual only */ }
+  });
   if (state.screen !== "race") return; // user left while loading
 
   const rig = buildCarRig(model);
@@ -1037,7 +1056,7 @@ function frame() {
 // Boot
 // ---------------------------------------------------------------------------
 // Dev handle for the console / automated checks (harmless in the demo).
-window.ER = { state, cameraRig, TUNING, keys, camera, THREE, mp, remotes, computeLeaderboard, computeResultsBoard, updateRace, hudBanner };
+window.ER = { state, cameraRig, TUNING, keys, camera, THREE, mp, remotes, computeLeaderboard, computeResultsBoard, updateRace, hudBanner, showcase };
 
 preloadCarAssets();
 setShowcaseCar(getCar(state.carId));
