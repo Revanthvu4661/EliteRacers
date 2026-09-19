@@ -470,6 +470,16 @@ implemented differently either way.
   starts at GO. `ER.perfSummary()` prints performance marks from the click to GO plus slow frames.
   Multiplayer path is implemented but NOT live-tested (Anonymous sign-in still off).
 
+## Track selection + 3 tracks (2026-09-19, tags ok-track1 .. ok-track7)
+
+- **Data-driven tracks** (track.js): `TRACKS` array (green-valley, red-mesa, harbor-nights), `getTrack/listTracks/getTrackPreview`, `buildTrack(id, world, scene)` returns group, samples, checkpoints, pickups, startPose, `gridSlot(i)`, `nearest`, `dispose()`. Track 1 is numerically identical to the old one (sample/checkpoint/pickup hashes matched pre-change).
+- **Themes** (themes.js): `sunny`, `desert`, `nightRain`. `createEnvironment` creates sky, sun, hemisphere and ONE headlight spot once; `apply(themeId)` only changes properties. Light count is constant (12 with the pickup pool). Lightning modulates hemisphere intensity and exposure only.
+- **Scenery/weather** (scenery.js): InstancedMesh / merged geometry per theme, pooled rain LineSegments / dust Points (halved if avg frame > 22 ms), lamp glow via additive Points (no per-lamp lights). `disposeTrack()` disposes scenery + track and restores the sunny theme.
+- **Flow**: car-select -> track-select (screen-tracks) -> race. Best times: localStorage `er_best_v1_<trackId>`.
+- **Multiplayer**: host writes `trackId` to the room (rules allow extra fields, no rules change). All clients load `room.trackId`. NOT VERIFIED with two browsers: Firebase Anonymous sign-in is off and Google sign-in is unreachable here.
+- **Verification done (dev-only harness, not committed)**: validator on all 3 tracks (closed loop, separation, radius, pickups/checkpoints in road; Green Valley min radius is 26.4 m as originally shipped), pure-pursuit autopilot lap on Red Mesa (2 laps to results) and Harbor Nights (lap counted once, checkpoints in order, max offset < 6 m), wall-teleport harness (Red Mesa 234 trials, Harbor Nights 198 trials, no pass-through), leak test (Track 1,2,3,1 x5: geometries 37, textures 16, programs 32 before and after), render cost per frame (Green Valley 2.7 ms, Red Mesa 6.1 ms, Harbor Nights 4.8 ms; the browser pane caps rAF at ~30 fps so wall-clock frame time was 33 ms on all three).
+- **Lessons**: hidden/throttled pane freezes physics, so wake it with a screenshot before timing; `keys` is a Set of "up/down/left/right"; chassis forward is local +X; the R key listener is on `document`; 0-HP respawn only fires through the collision path (`pendingRespawn`).
+
 ## Testing notes for whoever continues
 
 **Round 3 testing lessons (read before writing a harness):**
