@@ -104,19 +104,19 @@ Realtime Database → Rules → Publish whenever this gets addressed.
 
 ## CRITICAL GOTCHA — cache busting
 
-All local ES module imports carry a version query, currently **`?v=35`**:
+All local ES module imports carry a version query, currently **`?v=44`**:
 ```js
-import { createWorld } from "./physics.js?v=35";
+import { createWorld } from "./physics.js?v=44";
 ```
-`index.html` has both `<script type="module" src="main.js?v=35">` and
-`<link rel="stylesheet" href="styles.css?v=35">`. **The browser caches these files
+`index.html` has both `<script type="module" src="main.js?v=44">` and
+`<link rel="stylesheet" href="styles.css?v=44">`. **The browser caches these files
 independently of the page.** Editing a module without bumping the version means
 your changes silently do not load. After editing any module or the stylesheet, bump
-every `?v=N` together as the LAST step, e.g. from `v=35` to `v=36`:
+every `?v=N` together as the LAST step, e.g. from `v=44` to `v=45`:
 ```bash
 cd "/d/Gaming Hackathon" && \
-  sed -i 's/\.js?v=35"/.js?v=36"/g' main.js auth.js multiplayer.js pickups.js && \
-  sed -i 's/main.js?v=35/main.js?v=36/; s/styles.css?v=35/styles.css?v=36/' index.html
+  sed -i 's/\.js?v=44"/.js?v=45"/g' main.js auth.js multiplayer.js pickups.js && \
+  sed -i 's/main.js?v=44/main.js?v=45/; s/styles.css?v=44/styles.css?v=45/' index.html
 ```
 (Only main.js, auth.js, multiplayer.js and pickups.js contain versioned imports; the
 other modules import only `three`/`cannon-es`.) `index.html` itself is also heuristically
@@ -420,6 +420,32 @@ implemented differently either way.
   frequency/gain/filter follow speed, and the node count returns to 0 after every race.
 - **Speedometer live:** `speedometer.js` (canvas gauge in `#speedo`). The old `.hud-speed` text
   element still exists and is still updated, but is `display: none`.
+
+## Round 3 (2026-09-19): wall pass-through + race-start lag
+
+- **Cars driving through barriers (root causes):** (1) every barrier body kept an AABB computed BEFORE it was
+  positioned (centred on the origin); cannon's sweep-and-prune broadphase sorts by AABB, so wall/car pairs were
+  skipped depending on the chassis' x (43% of 1314 wall-strike tests passed straight through at commit ea82f0f,
+  same at ok-baseline, i.e. not a regression, present since the 2.2x track). (2) real holes on the OUTSIDE of tight
+  corners (fixed 8.8 m grid + 14 m colliders vs. a wall line up to 17 m between segments). Fix in `track.js`: walls
+  are generated per sample pair along the wall line (continuous, 1.5 m overlap, 2.2 m thick outward, 8 m tall) and
+  ALL colliders are shapes of ONE static compound body (840 separate bodies made each physics step ~6x slower
+  through cannon's O(n^2) collision matrix); AABB computed explicitly. `main.js` has a per-frame safety net
+  (clamps a breaching car to the wall face, removes outward velocity, damage once). Now 2520/2520 perpendicular
+  strikes hold (every sample, 30/120/205+boost km/h) plus 29/57 degree and 20 fps-frame variants; physics step
+  1.1-1.6 ms -> 0.2 ms. Visual clipping (rendered car 6.35 x 3.2 m vs 3.9 x 1.8 m chassis box) is by design
+  (VISUAL_SCALE 1.4) and was NOT changed.
+  **Gotcha for testers:** `RaycastVehicle.castRay` sets `chassisBody.collisionResponse = false` around each wheel
+  ray; if a script is interrupted mid-ray (tool timeout) the chassis stays non-colliding until you reset it.
+- **Race-start lag (root cause):** first-use work ran inside the running countdown - pickups (with 9 point lights)
+  were re-created per race (light-count change = recompile of every lit material), the new car's materials were
+  compiled against the race lights, textures were uploaded - while the countdown deadline was already stamped.
+  Now: pickups pooled (`pickups.reset()`), circuit built + scene `compileAsync`'d while on car-select/lobby
+  (`schedulePrewarm`), "Loading race..." overlay paints first, then `renderer.compile` + `initTexture` under it,
+  then a `warmup` phase (frozen car, frames rendering) until 10 spike-free frames (`noteFrame`) or 5 s, THEN the
+  countdown starts (`beginCountdown`). Online keeps the server-synced start time (`syncedEnd`). Race timer still
+  starts at GO. `ER.perfSummary()` prints performance marks from the click to GO plus slow frames.
+  Multiplayer path is implemented but NOT live-tested (Anonymous sign-in still off).
 
 ## Testing notes for whoever continues
 
