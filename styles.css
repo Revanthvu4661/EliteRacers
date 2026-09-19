@@ -125,6 +125,12 @@ kbd {
 .topbar { top: 0; }
 .bottombar { bottom: 0; justify-content: center; gap: 14px; flex-wrap: wrap; background: linear-gradient(to top, rgba(7,8,12,0.85), transparent); }
 .topbar-title { font-family: var(--font-display); font-weight: 700; letter-spacing: 3px; font-size: 18px; }
+.topbar-titlebox { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.level-line { display: flex; align-items: center; gap: 10px; font-size: 12px; letter-spacing: 1px; }
+.level-badge { font-family: var(--font-display); font-weight: 700; color: var(--accent-2); }
+.level-bar { width: 120px; height: 6px; border-radius: 999px; background: rgba(255,255,255,0.12); overflow: hidden; }
+.level-fill { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width 400ms ease; }
+.level-xp { color: var(--muted); font-variant-numeric: tabular-nums; }
 .topbar-right { display: flex; align-items: center; gap: 12px; }
 .chip {
   display: inline-flex; align-items: center; gap: 8px;

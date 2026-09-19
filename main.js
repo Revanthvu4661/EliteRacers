@@ -11,22 +11,22 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=52";
-import * as ui from "./ui.js?v=52";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=52";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=52";
-import { buildTrack, getTrack, listTracks, getTrackPreview, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=52";
-import { createCameraRig } from "./camera.js?v=52";
-import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=52";
-import { commentate } from "./ai-commentary.js?v=52";
-import * as mp from "./multiplayer.js?v=52";
-import { createPickups } from "./pickups.js?v=52";
-import { createMinimap } from "./minimap.js?v=52";
-import { createEnvironment, getTheme } from "./themes.js?v=52";
-import { buildScenery } from "./scenery.js?v=52";
-import { createSpeedometer } from "./speedometer.js?v=52";
-import * as prog from "./progression.js?v=52";
-import * as audio from "./audio.js?v=52";
+import * as auth from "./auth.js?v=53";
+import * as ui from "./ui.js?v=53";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=53";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=53";
+import { buildTrack, getTrack, listTracks, getTrackPreview, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=53";
+import { createCameraRig } from "./camera.js?v=53";
+import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=53";
+import { commentate } from "./ai-commentary.js?v=53";
+import * as mp from "./multiplayer.js?v=53";
+import { createPickups } from "./pickups.js?v=53";
+import { createMinimap } from "./minimap.js?v=53";
+import { createEnvironment, getTheme } from "./themes.js?v=53";
+import { buildScenery } from "./scenery.js?v=53";
+import { createSpeedometer } from "./speedometer.js?v=53";
+import * as prog from "./progression.js?v=53";
+import * as audio from "./audio.js?v=53";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera
@@ -583,7 +583,14 @@ function skinnedCar(carCfg) {
   catch (_) { return carCfg; }
 }
 function refreshCoins() {
-  try { ui.setCoinBalance(prog.loadProgress(progressUid()).coins); } catch (_) { /* UI only */ }
+  try {
+    const p = prog.loadProgress(progressUid());
+    ui.setCoinBalance(p.coins);
+    const lv = prog.levelFromXP(p.xp);
+    document.getElementById("level-num").textContent = lv.lvl;
+    document.getElementById("level-xp").textContent = `${lv.into} / ${lv.need} XP`;
+    document.getElementById("level-fill").style.width = `${Math.round((lv.into / lv.need) * 100)}%`;
+  } catch (_) { /* UI only */ }
 }
 
 const garageStatus = (msg, kind) => ui.setStatus("garage-status", msg, kind);

@@ -7,7 +7,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏎️</text></svg>" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=52" />
+  <link rel="stylesheet" href="styles.css?v=53" />
 
   <!-- Import map: every module imports "three", "three/addons/..." and "cannon-es"
        by bare name. Change versions here, nowhere else. No build step. -->
@@ -53,7 +53,10 @@
   <!-- ============ SCREEN: CAR SELECT ============ -->
   <section id="screen-select" class="screen">
     <header class="topbar">
-      <span class="topbar-title">CHOOSE YOUR CAR</span>
+      <div class="topbar-titlebox">
+        <span class="topbar-title">CHOOSE YOUR CAR</span>
+        <div class="level-line" title="Player level"><span class="level-badge">LEVEL <span id="level-num">1</span></span><span class="level-bar"><span id="level-fill" class="level-fill"></span></span><span class="level-xp" id="level-xp">0 / 100 XP</span></div>
+      </div>
       <span class="topbar-right">
         <button class="btn btn-small btn-ghost btn-mute" title="Sound on (M)" aria-label="Toggle sound">&#128266;</button>
         <span id="coin-chip" class="chip coin-chip" title="Coins">&#9679; <span id="coin-balance">0</span></span>
@@ -222,6 +225,6 @@
   <!-- Toasts (errors, notices) -->
   <div id="toast-root"></div>
 
-  <script type="module" src="main.js?v=52"></script>
+  <script type="module" src="main.js?v=53"></script>
 </body>
 </html>
