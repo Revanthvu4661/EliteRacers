@@ -33,8 +33,8 @@
 
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { makeRng } from "./themes.js?v=55";
-import { makeBarkTexture, makeLeafTexture } from "./tree-textures.js?v=55";
+import { makeRng } from "./themes.js?v=56";
+import { makeBarkTexture, makeLeafTexture } from "./tree-textures.js?v=56";
 
 const UP = new THREE.Vector3(0, 1, 0);
 

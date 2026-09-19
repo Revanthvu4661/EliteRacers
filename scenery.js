@@ -16,8 +16,8 @@
 
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { getTheme, makeRng, hashString } from "./themes.js?v=55";
-import { createTreeAssets, THEME_TREES, TREE_QUALITY, pickQuality } from "./trees.js?v=55";
+import { getTheme, makeRng, hashString } from "./themes.js?v=56";
+import { createTreeAssets, THEME_TREES, TREE_QUALITY, pickQuality } from "./trees.js?v=56";
 
 const SLOW_FRAME_S = 0.022;
 const SLOW_FOR_S = 2;
@@ -120,82 +120,204 @@ function buildTreesOld(group, track, rnd, P) {
 }
 
 // ---------------------------------------------------------------------------
-// New procedural trees (trees.js). T1 scope: wire the generator in behind ?trees=old using the
-// SAME placement loop buildTreesOld used above, rendering LOD0 only (no per-chunk LOD switching,
-// no exclusion zones beyond the ones already here) - T2 replaces this placement/instancing block
-// wholesale with seeded clumps, exclusion zones and chunked LOD. Kept deliberately thin so T2 has
-// a clean function to rewrite rather than a real placement system to unpick.
+// New procedural trees (trees.js), T2: seeded clump placement with exclusion zones, chunked into
+// ~60 m spatial cells along the track's arc length. Each chunk is ONE (species, variant) - a
+// clump can straddle a chunk boundary and show two species where it does, which is both what a
+// real tree line looks like and the thing that keeps the mesh count, and so the draw-call count,
+// bounded by construction: exactly one InstancedMesh per (chunk, LOD), never per (chunk, clump).
+//
+//   MAX_TREE_MESHES   caps chunk count so 2 draw calls/mesh (bark+leaf) * meshes <= the 60 budget
+//   NEAR_M / FAR_M     the lateral band trees are allowed in, off the track centreline
+//   EXCLUDE_*          keep-clear radii around the start line and every checkpoint/pickup
+//
+// LOD: all 3 LOD tiers are built and added (hidden) for every chunk at load time; handle.update()
+// throttles to a pick every CHUNK_UPDATE_MS and only toggles .visible - no allocation, no
+// creation/removal during the race. 10% hysteresis stops a chunk flickering between two LODs
+// when the camera sits near a threshold.
 // ---------------------------------------------------------------------------
-function buildTreesNew(group, track, rnd, P, theme) {
-  const target = 260;
-  const positions = [];
-  let tries = 0;
-  while (positions.length < target && tries++ < target * 40) {
-    const [x, z] = P.randomPoint(20);
-    const d = P.centreDist(x, z);
-    if (d < P.wall + 5 || d > 150) continue;
-    if (P.nearStart(x, z, 80)) continue;
-    positions.push([x, z]);
-  }
+const MAX_TREE_MESHES = 29;      // *2 draw calls (bark+leaf) = 58, under the 60-call budget
+const CHUNK_UPDATE_MS = 250;
+const LOD_HYSTERESIS = 0.10;
+const EXCLUDE_START_M = 40;      // first/last 40 m around the start line
+const EXCLUDE_POINT_M = 15;      // checkpoints, pickups (the gantry/grandstand sit AT the start
+                                  // line's checkpoint, already covered by EXCLUDE_START_M)
 
-  const qualityId = pickQuality();
-  const assets = createTreeAssets(theme.id, qualityId, hashString(track.id) + 3, null);
+function buildTreesNew(group, track, rnd, P, theme, quality) {
+  const assets = createTreeAssets(theme.id, quality.id, hashString(track.id) + 3, null);
   const mix = THEME_TREES[theme.id] || [];
-  if (!mix.length || !assets.variants.length) return { assets };
+  if (!mix.length || !assets.variants.length) return { assets, update() {}, dispose() {}, debug: null };
 
-  // Deterministic weighted species pick (mix weights sum to ~1; a stray remainder falls to the
-  // last species rather than picking none).
-  function pickSpecies(u) {
-    let acc = 0;
-    for (const [sid, w] of mix) { acc += w; if (u < acc) return sid; }
-    return mix[mix.length - 1][0];
+  // --- exclusion zones ---------------------------------------------------------
+  const excludeCircles = []; // {x, z, r}
+  for (const cp of track.checkpoints) excludeCircles.push({ x: cp.position.x, z: cp.position.z, r: EXCLUDE_POINT_M });
+  for (const pk of track.pickups) excludeCircles.push({ x: pk.position.x, z: pk.position.z, r: EXCLUDE_POINT_M });
+  function excluded(x, z) {
+    if (Math.hypot(x - P.start.x, z - P.start.z) < EXCLUDE_START_M) return true;
+    for (const e of excludeCircles) { const dx = x - e.x, dz = z - e.z; if (dx * dx + dz * dz < e.r * e.r) return true; }
+    return false;
   }
 
-  // Bucket instance transforms per (species, variant) so each becomes exactly one InstancedMesh.
-  const buckets = new Map(); // key "species:vi" -> { variant, mats: Float32Array-backed list }
+  // --- lateral band --------------------------------------------------------------
+  // "halfWidth + kerb + 6 m" is read here as the WALL line (P.wall = halfWidth + barrierOffset)
+  // plus a 6 m clearance margin, not the ~1 m painted kerb strip itself - the literal kerb sits
+  // INSIDE the barrier, so anchoring to it would let trees spawn between the kerb and the wall
+  // (i.e. visually inside/through the barrier). Conservative reading, noted per the brief.
+  const NEAR_M = P.wall + 6;
+  const FAR_M = 80;
+
+  // --- deterministic weighted species pick, then a uniform pick within that species' variants --
+  function pickVariant(u1, u2) {
+    let acc = 0, sid = mix[mix.length - 1][0];
+    for (const [s, w] of mix) { acc += w; if (u1 < acc) { sid = s; break; } }
+    const vs = assets.variants.filter((v) => v.species === sid);
+    return vs.length ? vs[(u2 * vs.length) | 0] : null;
+  }
+
+  // --- chunk the track's arc length, sized so mesh count never exceeds the draw-call budget ----
+  const L = track.length, S = track.samples, N = S.length;
+  const chunkSize = Math.max(60, L / MAX_TREE_MESHES);
+  const chunkCount = Math.min(MAX_TREE_MESHES, Math.max(1, Math.round(L / chunkSize)));
+  const chunkLen = L / chunkCount;
+  const chunkVariant = [];
+  for (let i = 0; i < chunkCount; i++) chunkVariant.push(pickVariant(rnd(), rnd()));
+
+  // --- clump placement along arc length: jittered strides, each either a clump or a clearing ---
+  const target = quality.count;
+  const placed = []; // {x, z, chunkIdx, scale, yaw, tiltAngle, tiltDir}
+  let arc = rnd() * 20, guard = 0;
+  while (arc < L && placed.length < target * 1.3 && guard++ < 40000) {
+    const stride = 14 + rnd() * 16;
+    arc += stride;
+    if (rnd() < 0.22) continue; // a clearing: this stride gets no clump at all
+
+    const u = ((arc / L) % 1 + 1) % 1;
+    const si = Math.floor(u * N) % N;
+    const s = S[si];
+    const ci = Math.min(chunkCount - 1, Math.floor(arc / chunkLen) % chunkCount);
+    if (!chunkVariant[ci]) continue;
+    const side = rnd() < 0.5 ? 1 : -1;
+    const clumpLat = NEAR_M + rnd() * (FAR_M - NEAR_M) * 0.7; // biased toward the near half
+    const clumpSize = 3 + ((rnd() * 6) | 0);
+
+    for (let k = 0; k < clumpSize && placed.length < target * 1.3; k++) {
+      const lat = clumpLat + (rnd() - 0.5) * 14;
+      if (lat < NEAR_M || lat > FAR_M) continue;
+      const along = (rnd() - 0.5) * 16;
+      const x = s.p.x + s.n.x * side * lat + s.t.x * along;
+      const z = s.p.z + s.n.z * side * lat + s.t.z * along;
+      if (excluded(x, z)) continue;
+      // s.n is only exact for a locally straight stretch; re-check the REAL distance to the
+      // centreline (P.centreDist, authoritative) rather than trust the offset arithmetic alone.
+      const d = P.centreDist(x, z);
+      if (d < NEAR_M - 3 || d > FAR_M + 10) continue;
+      const along2 = arc + along; // this tree's own arc position (clump centre's arc +- jitter)
+      const kc = Math.min(chunkCount - 1, Math.floor((((along2 % L) + L) % L) / chunkLen));
+      placed.push({
+        x, z, chunkIdx: kc,
+        scale: 0.8 + rnd() * 0.6, yaw: rnd() * Math.PI * 2,
+        tiltAngle: rnd() * (3 * Math.PI / 180), tiltDir: rnd() * Math.PI * 2,
+      });
+    }
+  }
+
+  // --- build 3 LOD InstancedMeshes per non-empty chunk (all hidden; the LOD pass below turns
+  //     the right tier on). Manual bounding sphere per mesh (not the shared geometry's - that
+  //     would apply one chunk's bounds to every other chunk reusing the same variant/LOD
+  //     geometry) is what makes frustumCulled=true correct for a shared-geometry InstancedMesh:
+  //     three.js's Frustum.intersectsObject checks object.boundingSphere before falling back to
+  //     the geometry's. ------------------------------------------------------------------------
+  const byChunk = new Map();
+  for (const p of placed) { let a = byChunk.get(p.chunkIdx); if (!a) byChunk.set(p.chunkIdx, a = []); a.push(p); }
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), pos = new THREE.Vector3(), scl = new THREE.Vector3();
   const tiltAxis = new THREE.Vector3(), yUp = new THREE.Vector3(0, 1, 0), yawQ = new THREE.Quaternion();
-  const col = new THREE.Color();
-  positions.forEach(([x, z]) => {
-    const sid = pickSpecies(rnd());
-    const variants = assets.variants.filter((v) => v.species === sid);
-    if (!variants.length) return;
-    const variant = variants[(rnd() * variants.length) | 0];
-    const key = sid + ":" + variant.index;
-    let b = buckets.get(key);
-    if (!b) { b = { variant, list: [] }; buckets.set(key, b); }
+  const col = new THREE.Color(), sphereCentre = new THREE.Vector3();
+  const chunks = [];
+  let totalMeshes = 0;
+  for (const [ci, items] of byChunk) {
+    const variant = chunkVariant[ci];
+    if (!variant || !items.length) continue;
+    sphereCentre.set(0, 0, 0);
+    for (const it of items) sphereCentre.add(new THREE.Vector3(it.x, 0, it.z));
+    sphereCentre.multiplyScalar(1 / items.length);
+    let maxDist = 0;
+    for (const it of items) maxDist = Math.max(maxDist, Math.hypot(it.x - sphereCentre.x, it.z - sphereCentre.z));
+    const treeExtent = variant.height * 1.4 * 0.75; // instance scale tops out at 1.4x; a generous radius, not a tight fit
+    const sphere = new THREE.Sphere(new THREE.Vector3(sphereCentre.x, treeExtent, sphereCentre.z), maxDist + treeExtent);
 
-    const scale = 0.8 + rnd() * 0.6; // briefed 0.8-1.4 of the species' natural height
-    const yaw = rnd() * Math.PI * 2;
-    const tiltAngle = rnd() * (3 * Math.PI / 180); // <= 3 degrees
-    const tiltDir = rnd() * Math.PI * 2;
-    tiltAxis.set(Math.cos(tiltDir), 0, Math.sin(tiltDir));
-    q.setFromAxisAngle(tiltAxis, tiltAngle);
-    yawQ.setFromAxisAngle(yUp, yaw);
-    q.multiply(yawQ);
-    pos.set(x, 0, z);
-    scl.set(scale, scale, scale);
-    m.compose(pos, q, scl);
-    col.setHSL(0.32 + (rnd() - 0.5) * 0.05, 0.45 + rnd() * 0.15, 0.42 + (rnd() - 0.5) * 0.12);
-    b.list.push({ matrix: m.clone(), color: col.clone() });
-  });
-
-  for (const { variant, list } of buckets.values()) {
-    const geo = variant.lods[0].geometry; // T1: LOD0 only; T2 adds per-chunk distance LOD
-    const mesh = new THREE.InstancedMesh(geo, variant.materials, Math.max(1, list.length));
-    // No shadows from trees (see file header): the sun's shadow camera only spans ~60 m around
-    // the car, and the old cone trees spent ~2.5 ms/frame in that pass for shadows almost never
-    // on screen (confirmed in the baseline decomposition: shadow pass ~= tree draw cost).
-    mesh.castShadow = false;
-    mesh.receiveShadow = false;
-    mesh.frustumCulled = false; // instances spread over the whole map, same as every other set here
-    list.forEach((inst, i) => { mesh.setMatrixAt(i, inst.matrix); mesh.setColorAt(i, inst.color); });
-    mesh.count = list.length;
-    mesh.name = "tree-" + variant.species + "-v" + variant.index;
-    group.add(mesh);
+    const lodMeshes = [];
+    for (let lod = 0; lod < 3; lod++) {
+      const mesh = new THREE.InstancedMesh(variant.lods[lod].geometry, variant.materials, items.length);
+      items.forEach((it, i) => {
+        tiltAxis.set(Math.cos(it.tiltDir), 0, Math.sin(it.tiltDir));
+        q.setFromAxisAngle(tiltAxis, it.tiltAngle);
+        yawQ.setFromAxisAngle(yUp, it.yaw);
+        q.multiply(yawQ);
+        pos.set(it.x, 0, it.z);
+        scl.set(it.scale, it.scale, it.scale);
+        m.compose(pos, q, scl);
+        mesh.setMatrixAt(i, m);
+        col.setHSL(0.32 + (rnd() - 0.5) * 0.05, 0.45 + rnd() * 0.15, 0.42 + (rnd() - 0.5) * 0.12);
+        mesh.setColorAt(i, col);
+      });
+      mesh.count = items.length;
+      // No shadows from trees (see file header): the sun's shadow camera only spans ~60 m around
+      // the car, and the old cone trees spent most of their frame cost in that pass for shadows
+      // almost never on screen.
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+      mesh.boundingSphere = sphere.clone();
+      mesh.frustumCulled = true;
+      mesh.visible = false;
+      mesh.name = "tree-c" + ci + "-" + variant.species + "v" + variant.index + "-L" + lod;
+      group.add(mesh);
+      lodMeshes.push(mesh);
+      totalMeshes++;
+    }
+    chunks.push({ idx: ci, center: sphereCentre.clone(), lodMeshes, activeLod: -1, count: items.length });
   }
 
-  return { assets };
+  // --- per-frame (throttled) LOD selection: distance-only, 10% hysteresis, visibility toggle
+  //     only - no allocation. ----------------------------------------------------------------
+  let acc = 0;
+  const camXZ = new THREE.Vector2();
+  function pickLod(dist, cur) {
+    const b0 = quality.lod0, b1 = quality.lod1, far = quality.far;
+    if (cur === 0) { if (dist > b0 * (1 + LOD_HYSTERESIS)) cur = dist > b1 * (1 + LOD_HYSTERESIS) ? (dist > far ? -1 : 2) : 1; }
+    else if (cur === 1) {
+      if (dist < b0 * (1 - LOD_HYSTERESIS)) cur = 0;
+      else if (dist > b1 * (1 + LOD_HYSTERESIS)) cur = dist > far ? -1 : 2;
+    } else if (cur === 2) {
+      if (dist > far) cur = -1;
+      else if (dist < b1 * (1 - LOD_HYSTERESIS)) cur = dist < b0 * (1 - LOD_HYSTERESIS) ? 0 : 1;
+    } else { // cur === -1 (hidden): re-enter at whichever tier this distance belongs to
+      cur = dist > far ? -1 : dist > b1 ? 2 : dist > b0 ? 1 : 0;
+    }
+    return cur;
+  }
+  function updateLods(camera) {
+    camXZ.set(camera.position.x, camera.position.z);
+    for (const c of chunks) {
+      const dist = Math.hypot(c.center.x - camXZ.x, c.center.z - camXZ.y);
+      const next = pickLod(dist, c.activeLod);
+      if (next === c.activeLod) continue;
+      if (c.activeLod >= 0) c.lodMeshes[c.activeLod].visible = false;
+      if (next >= 0) c.lodMeshes[next].visible = true;
+      c.activeLod = next;
+    }
+  }
+
+  return {
+    assets,
+    update(dt, camera) {
+      acc += dt * 1000;
+      if (acc < CHUNK_UPDATE_MS) return;
+      acc = 0;
+      updateLods(camera);
+    },
+    // Dev-only hook (harmless if never called): _dev/ scripts read this to verify placement -
+    // every instance clear of the centreline by the briefed margin and of every exclusion zone.
+    debug: { placed, chunks, NEAR_M, FAR_M, EXCLUDE_START_M, EXCLUDE_POINT_M, totalMeshes, chunkCount },
+  };
 }
 
 function buildMesa(group, track, rnd, P) {
@@ -515,10 +637,14 @@ export function buildScenery(themeId, track, scene) {
   group.name = "scenery-" + theme.id;
   const rnd = makeRng(hashString(track.id) + 1);
   const P = makePlacement(track, rnd);
-  let treeAssets = null;
+  let treeAssets = null, treesHandle = null;
   if (theme.sceneryId === "trees") {
-    if (treesWanted()) treeAssets = buildTreesNew(group, track, rnd, P, theme).assets;
-    else buildTreesOld(group, track, rnd, P);
+    if (treesWanted()) {
+      const qualityId = pickQuality();
+      const quality = Object.assign({ id: qualityId }, TREE_QUALITY[qualityId] || TREE_QUALITY.high);
+      treesHandle = buildTreesNew(group, track, rnd, P, theme, quality);
+      treeAssets = treesHandle.assets;
+    } else buildTreesOld(group, track, rnd, P);
   }
   else if (theme.sceneryId === "mesa") buildMesa(group, track, rnd, P);
   else if (theme.sceneryId === "port") buildPort(group, track, rnd, P);
@@ -528,17 +654,23 @@ export function buildScenery(themeId, track, scene) {
   let disposed = false;
   return {
     group, weather, themeId: theme.id,
-    update(dt, camera) { if (weather && !disposed) weather.step(dt, camera); },
+    // Dev-only: _dev/ scripts read this to verify tree placement (never referenced by game code).
+    treesDebug: treesHandle && treesHandle.debug,
+    update(dt, camera) {
+      if (disposed) return;
+      if (weather) weather.step(dt, camera);
+      if (treesHandle) treesHandle.update(dt, camera);
+    },
     dispose() {
       if (disposed) return;
       disposed = true;
       scene.remove(group);
       disposeTree(group);
-      // Frees every LOD's geometry/material/texture, including L1/L2 which (T1) are baked but
-      // never added to the scene graph, so disposeTree's traversal above never sees them - only
-      // this explicit call does. Safe to run after disposeTree: three.js dispose() is a no-op on
-      // an already-freed resource, so the L0 set (freed by both paths) is not double-freed in any
-      // harmful way, just redundantly.
+      // Frees every LOD's geometry/material/texture, including whichever tiers (L1/L2, or the
+      // hidden ones for a given chunk) disposeTree's traversal above still sees since ALL tiers
+      // are added to the group (just hidden) here in T2 - so this is now mostly redundant with
+      // disposeTree, but stays as a second, explicit line of defence: three.js dispose() is a
+      // no-op on an already-freed resource, so calling both is safe, not harmful double-freeing.
       if (treeAssets) treeAssets.dispose();
     },
   };
