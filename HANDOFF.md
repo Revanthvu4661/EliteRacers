@@ -45,7 +45,7 @@ Without those files present, every car silently falls back to the tinted Ferrari
 | 8. Juice pass | Partial - shake wired; tire smoke/engine audio not started |
 | 9-11. Multiplayer lobby / in-race sync / shared results | Code-complete, **still never live-tested with 2 real players** (blocker below) |
 | 12-16. 2.2x track, pickups, barrier reaction, health, minimap | Done (earlier sessions) |
-| **2026-09-19 session** | |
+| **2026-09-19 session** (all done; round-2 fixes below) | |
 | T1. 0 HP respawn fix | Done, verified (sub-1% health now clamps to 0) |
 | T2. Analog speedometer (`speedometer.js`, written this session - it was not in the repo) | Done, verified |
 | T3. Car-select: hero car centred, bottom card strip slides, tint cross-fade | Done, verified |
@@ -104,19 +104,19 @@ Realtime Database → Rules → Publish whenever this gets addressed.
 
 ## CRITICAL GOTCHA — cache busting
 
-All local ES module imports carry a version query, currently **`?v=28`**:
+All local ES module imports carry a version query, currently **`?v=35`**:
 ```js
-import { createWorld } from "./physics.js?v=28";
+import { createWorld } from "./physics.js?v=35";
 ```
-`index.html` has both `<script type="module" src="main.js?v=28">` and
-`<link rel="stylesheet" href="styles.css?v=28">`. **The browser caches these files
+`index.html` has both `<script type="module" src="main.js?v=35">` and
+`<link rel="stylesheet" href="styles.css?v=35">`. **The browser caches these files
 independently of the page.** Editing a module without bumping the version means
 your changes silently do not load. After editing any module or the stylesheet, bump
-every `?v=N` together as the LAST step, e.g. from `v=28` to `v=29`:
+every `?v=N` together as the LAST step, e.g. from `v=35` to `v=36`:
 ```bash
 cd "/d/Gaming Hackathon" && \
-  sed -i 's/\.js?v=28"/.js?v=29"/g' main.js auth.js multiplayer.js pickups.js && \
-  sed -i 's/main.js?v=28/main.js?v=29/; s/styles.css?v=28/styles.css?v=29/' index.html
+  sed -i 's/\.js?v=35"/.js?v=36"/g' main.js auth.js multiplayer.js pickups.js && \
+  sed -i 's/main.js?v=35/main.js?v=36/; s/styles.css?v=35/styles.css?v=36/' index.html
 ```
 (Only main.js, auth.js, multiplayer.js and pickups.js contain versioned imports; the
 other modules import only `three`/`cannon-es`.) `index.html` itself is also heuristically
@@ -243,7 +243,7 @@ header comment).
 ## Debug handle
 
 `window.ER` exposes `{ state, cameraRig, TUNING, keys, camera, THREE, mp, remotes,
-computeLeaderboard, computeResultsBoard, updateRace, hudBanner, showcase, prog }`.
+computeLeaderboard, computeResultsBoard, updateRace, hudBanner, showcase, prog, renderer, raceScene, dumpHero, gridPoseFor, gridOffsets, audio }`.
 ```js
 ER.state.race.veh.speedKmh()
 ER.state.race.health                              // current HP (0-100)
@@ -387,6 +387,39 @@ implemented differently either way.
   main.js, `ui.renderGarage`). Skins are applied by passing `skinnedCar(carCfg)` (the car
   config with `color` replaced) into the existing tint path at both `setShowcaseCar`
   and `startRace`. Tint-disabled cars show "Stock only".
+
+## Round 2 (2026-09-19): bug fixes + audio - what changed
+
+- **Boost/repair freeze (root cause):** every pickup owns a `PointLight`, and hiding the pickup
+  group (`mesh.visible = false`) removed it from the scene's visible-light list. three.js rebuilds
+  every lit material's shader when the light count changes: 3.9 s hitch per collect AND per respawn.
+  `pickups.js` now hides only the meshes and sets the light intensity to 0 (`setShown`). Rule for
+  anything new: **never add/remove/hide a light mid-race**. Worst render after a collect: 15 ms
+  (was 3860 ms), 18 collects in a row.
+- **Car vanishing on car select (root cause):** `instantiateReal` shared materials with the cached
+  GLB template, and the swap fade recorded mid-fade opacity as the "rest" value, so rapid card
+  switching left materials at opacity 0 (mesh visible, shadow still drawn). Now: materials are
+  cloned per instance (`car-model.js`), fades are idempotent (`fadeJob`, rest values in
+  `material.userData`, timeout failsafe), `healShowcase()` repairs the hero every 1.5 s on menu
+  screens, and `webglcontextlost/restored` rebuild the PMREM env map and hero.
+  `ER.dumpHero()` dumps every hero material. Verified: 90 rapid switches, 3 race round trips, a forced
+  context loss/restore, 195 s idle.
+- **Multiplayer grid:** every client used `startPose(7)` (identical spawn). `multiplayer.js`:
+  `orderUids(players)` (joinedAt, then uid) is written as `order` in the same update as the start
+  flag; `slotFor(view, uid)` reads it (falls back to the same sort). `track.js`: `gridOffsets(slot)`
+  (2 columns, 9 m rows, 5 m columns, 8 slots; larger than the 6 m / 3.5 m minimum because cars render
+  ~7 m x 3.2 m). `main.js` `gridPoseFor` is the ONE slot function for the local car and puppets.
+  Solo spawn unchanged. **Live two-browser test NOT done** (Anonymous sign-in off).
+- **Audio (`audio.js`, new):** procedural Web Audio, no assets. Context is created on the first
+  gesture, suspended when the tab is hidden; master 0.6 -> compressor; M key + `.btn-mute`
+  buttons (car-select header, race HUD); `{muted, volume}` in `er_audio_v1`. Engine = 2 detuned saws
+  + sub square -> lowpass, 5-gear RPM model (`rpmModel`), boost whine, drift squeal; UI sounds via one
+  delegated pointerdown handler; race SFX; <=12 SFX voices; <=3 remote engines dropped first when FPS
+  falls. `ER.audio.audioStats()` shows context state, live node count and engine params.
+  **Sound quality is UNVERIFIED by ear** - only that the context runs, voices are created, engine
+  frequency/gain/filter follow speed, and the node count returns to 0 after every race.
+- **Speedometer live:** `speedometer.js` (canvas gauge in `#speedo`). The old `.hud-speed` text
+  element still exists and is still updated, but is `display: none`.
 
 ## Testing notes for whoever continues
 
