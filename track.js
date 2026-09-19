@@ -11,7 +11,7 @@
 
 import * as THREE from "three";
 import * as CANNON from "cannon-es";
-import { getTheme, makeGroundTexture, makeRoadMaterial, hashString } from "./themes.js?v=47";
+import { getTheme, makeGroundTexture, makeRoadMaterial, hashString } from "./themes.js?v=50";
 
 // ---------------------------------------------------------------------------
 // TRACK DATA. A track is a plain data object; buildTrack(id, ...) turns it into geometry,
@@ -49,6 +49,32 @@ const GREEN_VALLEY_POINTS = [
   [-15, -160], [-100, -140], [-150, -70], [-135, 10], [-105, 32],
 ].map(([x, z]) => [x * SCALE, z * SCALE]);
 
+// Track 2 "Red Mesa": two long fast straights (the start straight bows gently north, the return bows
+// south) joined by two R=48 m hairpins. ~2.48 km. Validated: min radius 29.7 m, legs >= 96 m apart,
+// wall lines >= 64 m from any other stretch of road.
+const RED_MESA_POINTS = [
+  [-540, -78], [-270, -96], [0, -112], [270, -96], [540, -78],
+  [564, -71.6], [581.6, -54], [588, -30], [581.6, -6], [564, 11.6],
+  [540, 18], [300, 78], [0, 113], [-300, 78], [-540, 18],
+  [-564, 11.6], [-581.6, -6], [-588, -30], [-581.6, -54], [-564, -71.6],
+];
+
+// Track 3 "Harbor Nights": compact container-port circuit with five tight S-bend chicanes (arc R=38-40 m)
+// joined by R=50 m corners. ~1.54 km. Validated: min radius 30.6 m, legs >= 124 m apart.
+const HARBOR_NIGHTS_POINTS = [
+  [-184, -156], [-145.5, -156], [-106.9, -156], [-68.4, -156], [-29.8, -156], [8.7, -156], [47.3, -156],
+  [59.2, -154.1], [70, -148.5], [78.4, -139.8], [86.8, -131.1], [97.6, -125.5], [109.5, -123.6],
+  [144.5, -123.6], [179.5, -123.6], [195, -121.1], [208.9, -114], [220, -103], [227.1, -89], [229.5, -73.6],
+  [229.5, -40.3], [229.5, -7], [231.5, 5], [237, 15.7], [245.7, 24.2], [254.4, 32.6], [260, 43.3], [261.9, 55.3],
+  [261.9, 105.3], [259.5, 120.7], [252.4, 134.7], [241.3, 145.7], [227.4, 152.8], [211.9, 155.3],
+  [168.6, 155.3], [125.3, 155.3], [81.9, 155.3], [70, 153.4], [59.2, 147.8], [50.8, 139.1], [42.4, 130.4],
+  [31.6, 124.8], [19.7, 122.9], [-20.3, 122.9], [-32.3, 124.8], [-43, 130.4], [-51.4, 139.1], [-59.9, 147.8],
+  [-70.6, 153.4], [-82.6, 155.3], [-125.9, 155.3], [-169.2, 155.3], [-212.6, 155.3], [-228, 152.8],
+  [-242, 145.7], [-253, 134.7], [-260.1, 120.7], [-262.6, 105.3], [-262.6, 72], [-262.6, 38.6], [-262.6, 5.3],
+  [-260.9, -6.2], [-256, -16.7], [-248.3, -25.4], [-240.6, -34], [-235.7, -44.5], [-234, -56], [-234, -106],
+  [-231.6, -121.5], [-224.5, -135.4], [-213.4, -146.5], [-199.5, -153.6],
+];
+
 const boost = (t) => ({ kind: "boost", t });
 const repair = (t) => ({ kind: "repair", t });
 
@@ -72,12 +98,65 @@ export const TRACKS = [
     samples: 420,        // ribbon resolution (~4.4 m per sample)
     groundHalf: Math.round(340 * SCALE),
   },
+  {
+    id: "red-mesa",
+    name: "Red Mesa",
+    place: "Canyon country, Arizona",
+    weatherLabel: "Hot & dusty",
+    controlPoints: RED_MESA_POINTS,
+    width: 38,
+    laps: 2,
+    checkpointCount: 5,
+    pickups: [boost(0.07), boost(0.27), boost(0.34), boost(0.56), boost(0.68), boost(0.77),
+              repair(0.13), repair(0.52), repair(0.86)],
+    startT: 0,
+    themeId: "desert",
+    difficulty: "Fast",
+    samples: 540,
+    groundHalf: 1100,
+    groundMargin: 420,
+  },
+  {
+    id: "harbor-nights",
+    name: "Harbor Nights",
+    place: "Container port, North Sea",
+    weatherLabel: "Night rain",
+    controlPoints: HARBOR_NIGHTS_POINTS,
+    width: 32,
+    laps: 3,
+    checkpointCount: 4,
+    pickups: [boost(0.08), boost(0.19), boost(0.36), boost(0.58), boost(0.69), boost(0.9),
+              repair(0.14), repair(0.45), repair(0.82)],
+    startT: 0,
+    themeId: "nightRain",
+    difficulty: "Technical",
+    samples: 330,
+    groundHalf: 700,
+    groundMargin: 190,
+  },
 ];
 
 export const DEFAULT_TRACK_ID = TRACKS[0].id;
 export function listTracks() { return TRACKS.slice(); }
 /** Track data by id; an unknown id falls back to the default track (never throws). */
 export function getTrack(id) { return TRACKS.find((t) => t.id === id) || TRACKS[0]; }
+
+const previewCache = new Map();
+/**
+ * Cheap preview for menus (no meshes, no physics): { length, outline: [[x, z], ...] } sampled from the
+ * same spline the built track uses. Cached per id.
+ */
+export function getTrackPreview(id) {
+  const T = getTrack(id);
+  if (previewCache.has(T.id)) return previewCache.get(T.id);
+  const curve = new THREE.CatmullRomCurve3(T.controlPoints.map(([x, z]) => new THREE.Vector3(x, 0, z)), true, "centripetal");
+  const outline = [];
+  const n = 160;
+  for (let i = 0; i < n; i++) { const p = curve.getPointAt(i / n); outline.push([p.x, p.z]); }
+  const preview = { length: curve.getLength(), outline };
+  previewCache.set(T.id, preview);
+  return preview;
+}
 
 // Starting grid (multiplayer): 2 columns, rows BEHIND the start line along the track
 // tangent, up to 8 slots. Spacing is larger than the 6 m / 3.5 m minimum on purpose: the

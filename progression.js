@@ -105,6 +105,25 @@ export function applyRaceResult(uid, xp) {
 }
 
 // ---------------------------------------------------------------------------
+// Best times per track: localStorage "er_best_v1_<trackId>" = {lap, race} (ms). Not per account.
+// ---------------------------------------------------------------------------
+export function loadBest(trackId) {
+  try {
+    const d = JSON.parse(localStorage.getItem("er_best_v1_" + trackId));
+    return { lap: Number.isFinite(d && d.lap) ? d.lap : null, race: Number.isFinite(d && d.race) ? d.race : null };
+  } catch (_) { return { lap: null, race: null }; }
+}
+/** Record a finished race; returns { lap, race, newLap, newRace } (new* = improved on the stored best). */
+export function saveBest(trackId, lapMs, raceMs) {
+  const cur = loadBest(trackId);
+  const newLap = Number.isFinite(lapMs) && (cur.lap == null || lapMs < cur.lap);
+  const newRace = Number.isFinite(raceMs) && (cur.race == null || raceMs < cur.race);
+  const next = { lap: newLap ? Math.round(lapMs) : cur.lap, race: newRace ? Math.round(raceMs) : cur.race };
+  try { localStorage.setItem("er_best_v1_" + trackId, JSON.stringify(next)); } catch (_) { /* private mode */ }
+  return { ...next, newLap, newRace };
+}
+
+// ---------------------------------------------------------------------------
 // Skins: tints of the existing cars (no models). "default" = the car's own colour.
 // ---------------------------------------------------------------------------
 export const SKIN_CATALOG = {

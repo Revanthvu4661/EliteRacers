@@ -31,7 +31,7 @@
 // failure surfaces as a message so the UI can offer solo play instead.
 // ============================================================================
 
-import { getFirebaseApp, ensureFirebaseUid } from "./auth.js?v=47";
+import { getFirebaseApp, ensureFirebaseUid } from "./auth.js?v=50";
 
 const SDK_URL = "https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js";
 
@@ -167,6 +167,7 @@ function buildView(code, data) {
     isHost: data.hostId === uid,
     hostPresent: players.some((p) => p.isHost),
     raceStartAt: data.raceStartAt || null,
+    trackId: typeof data.trackId === "string" ? data.trackId : null,
     order: Array.isArray(data.order) ? data.order : (data.order && typeof data.order === "object" ? Object.values(data.order) : null),
     players,
     results: data.results || null,
@@ -218,6 +219,9 @@ export async function hostRoom(profile) {
         hostId: uid,
         status: "waiting",
         createdAt: serverNow(),
+        // The host picks the track; every client loads this one. (database.rules.json does not
+        // constrain extra fields under rooms/$code, so no rules change is needed.)
+        trackId: String(profile.trackId || "green-valley").slice(0, 40),
         players: { [uid]: playerNode(profile) },
       };
       // Create only if the code is free. (A null guess that's wrong is retried

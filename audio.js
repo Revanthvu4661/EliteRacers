@@ -148,8 +148,8 @@ export const denied = safe(() => {
   tone({ f0: 112, type: "square", dur: 0.2, gain: 0.1, delay: 0.02 });
 });
 
-const CONFIRM_IDS = new Set(["btn-race", "btn-multiplayer", "btn-host", "btn-join", "btn-room-start", "btn-again", "btn-google", "btn-skip", "btn-garage"]);
-const BACK_IDS = new Set(["btn-signout", "btn-garage-back", "btn-lobby-back", "btn-join-back", "btn-room-leave", "btn-change-car", "btn-quit"]);
+const CONFIRM_IDS = new Set(["btn-tracks-go", "btn-race", "btn-multiplayer", "btn-host", "btn-join", "btn-room-start", "btn-again", "btn-google", "btn-skip", "btn-garage"]);
+const BACK_IDS = new Set(["btn-tracks-back", "btn-signout", "btn-garage-back", "btn-lobby-back", "btn-join-back", "btn-room-leave", "btn-change-car", "btn-quit"]);
 
 // ---------------------------------------------------------------------------
 // Race SFX
@@ -402,9 +402,9 @@ export const initAudio = safe(() => {
   document.addEventListener("pointerdown", (e) => {
     try {
       ensureCtx(); // unlock on the first gesture
-      const el = e.target && e.target.closest ? e.target.closest("button, .car-card, .room-code") : null;
+      const el = e.target && e.target.closest ? e.target.closest("button, .car-card, .track-card, .room-code") : null;
       if (!el || el.disabled || el.dataset.sfx === "none" || el.classList.contains("btn-mute")) return;
-      if (el.classList.contains("car-card") || CONFIRM_IDS.has(el.id)) uiConfirm();
+      if (el.classList.contains("car-card") || el.classList.contains("track-card") || CONFIRM_IDS.has(el.id)) uiConfirm();
       else if (BACK_IDS.has(el.id)) uiBack();
       else uiClick();
     } catch (_) { /* never break input */ }
@@ -412,7 +412,7 @@ export const initAudio = safe(() => {
 
   document.addEventListener("pointerover", (e) => {
     try {
-      const card = e.target && e.target.closest ? e.target.closest(".car-card") : null;
+      const card = e.target && e.target.closest ? e.target.closest(".car-card, .track-card") : null;
       const t = performance.now();
       if (card && card !== lastHover && !card.classList.contains("selected") && t - lastHoverAt > 90) { lastHoverAt = t; uiHover(); }
       lastHover = card;

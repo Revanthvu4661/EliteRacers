@@ -7,7 +7,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏎️</text></svg>" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=47" />
+  <link rel="stylesheet" href="styles.css?v=50" />
 
   <!-- Import map: every module imports "three", "three/addons/..." and "cannon-es"
        by bare name. Change versions here, nowhere else. No build step. -->
@@ -70,6 +70,19 @@
     </footer>
   </section>
 
+  <!-- ============ SCREEN: TRACK SELECT (car-select -> track-select -> race) ============ -->
+  <section id="screen-tracks" class="screen">
+    <header class="topbar">
+      <span class="topbar-title">CHOOSE YOUR TRACK</span>
+      <span class="topbar-right"><span id="track-car-chip" class="chip"></span></span>
+    </header>
+    <div id="track-list" class="track-list" role="listbox" aria-label="Tracks"></div>
+    <footer class="bottombar">
+      <button id="btn-tracks-back" class="btn btn-ghost btn-wide">BACK</button>
+      <button id="btn-tracks-go" class="btn btn-primary btn-wide">RACE</button>
+    </footer>
+  </section>
+
   <!-- ============ SCREEN: GARAGE (skins = tints of the selected car) ============ -->
   <section id="screen-garage" class="screen">
     <header class="topbar">
@@ -97,6 +110,8 @@
       <div id="lobby-menu" class="lobby-panel">
         <h2 class="lobby-title">RACE ONLINE</h2>
         <p class="lobby-sub">Up to 4 racers. Host a room and read the code out, or join a friend's.</p>
+        <p class="lobby-sub lobby-track-label">TRACK (host chooses)</p>
+        <div id="lobby-track-picker" class="track-picker"></div>
         <button id="btn-host" class="btn btn-primary">Host Race</button>
         <button id="btn-join-open" class="btn btn-ghost">Join Race</button>
         <p id="lobby-status" class="status" aria-live="polite"></p>
@@ -117,6 +132,7 @@
       <div id="lobby-room" class="lobby-panel" hidden>
         <p class="room-label">ROOM CODE</p>
         <button id="room-code" class="room-code" title="Click to copy"></button>
+        <p class="room-track" id="room-track"></p>
         <p class="room-players-head"><span>RACERS</span><span id="room-count"></span></p>
         <ul id="room-players" class="room-players"></ul>
         <p id="room-status" class="status" aria-live="polite"></p>
@@ -133,6 +149,7 @@
         <div class="hud-lap">LAP <span id="hud-lap">1</span>/<span id="hud-laps">3</span></div>
         <div class="hud-time" id="hud-time">00:00.000</div>
         <div class="hud-best" id="hud-best"></div>
+        <div class="hud-track" id="hud-track"></div>
       </div>
       <div class="hud-bottom-right">
         <div class="hud-speed"><span id="hud-speed">0</span><small> km/h</small></div>
@@ -166,6 +183,7 @@
     <div class="results-card">
       <h2 class="results-title">RACE COMPLETE</h2>
       <p class="results-name" id="results-name"></p>
+      <p class="results-track" id="results-track"></p>
       <ul class="results-laps" id="results-laps"></ul>
       <!-- Multiplayer only: shared standings from /rooms/{code}/results. -->
       <div class="results-mp" id="results-mp" hidden>
@@ -204,6 +222,6 @@
   <!-- Toasts (errors, notices) -->
   <div id="toast-root"></div>
 
-  <script type="module" src="main.js?v=47"></script>
+  <script type="module" src="main.js?v=50"></script>
 </body>
 </html>

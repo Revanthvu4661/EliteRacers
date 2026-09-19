@@ -11,22 +11,22 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=47";
-import * as ui from "./ui.js?v=47";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=47";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=47";
-import { buildTrack, getTrack, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=47";
-import { createCameraRig } from "./camera.js?v=47";
-import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=47";
-import { commentate } from "./ai-commentary.js?v=47";
-import * as mp from "./multiplayer.js?v=47";
-import { createPickups } from "./pickups.js?v=47";
-import { createMinimap } from "./minimap.js?v=47";
-import { createEnvironment } from "./themes.js?v=47";
-import { buildScenery } from "./scenery.js?v=47";
-import { createSpeedometer } from "./speedometer.js?v=47";
-import * as prog from "./progression.js?v=47";
-import * as audio from "./audio.js?v=47";
+import * as auth from "./auth.js?v=50";
+import * as ui from "./ui.js?v=50";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=50";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=50";
+import { buildTrack, getTrack, listTracks, getTrackPreview, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=50";
+import { createCameraRig } from "./camera.js?v=50";
+import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=50";
+import { commentate } from "./ai-commentary.js?v=50";
+import * as mp from "./multiplayer.js?v=50";
+import { createPickups } from "./pickups.js?v=50";
+import { createMinimap } from "./minimap.js?v=50";
+import { createEnvironment, getTheme } from "./themes.js?v=50";
+import { buildScenery } from "./scenery.js?v=50";
+import { createSpeedometer } from "./speedometer.js?v=50";
+import * as prog from "./progression.js?v=50";
+import * as audio from "./audio.js?v=50";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera
@@ -619,7 +619,87 @@ function slideStrip() {
 }
 window.addEventListener("resize", slideStrip);
 
-document.getElementById("btn-race").addEventListener("click", () => goTo("race"));
+// ---------------------------------------------------------------------------
+// TRACK SELECT (car-select -> track-select -> race)
+// ---------------------------------------------------------------------------
+const trackList = document.getElementById("track-list");
+
+/** Mini outline of a track, drawn from its spline (no meshes built). */
+function drawTrackOutline(canvas, outline, accent) {
+  const W = 248, H = 108, dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const [x, z] of outline) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z); }
+  const pad = 14;
+  const k = Math.min((W - pad * 2) / (maxX - minX || 1), (H - pad * 2) / (maxZ - minZ || 1));
+  const ox = (W - (maxX - minX) * k) / 2 - minX * k, oz = (H - (maxZ - minZ) * k) / 2 - minZ * k;
+  ctx.lineJoin = "round"; ctx.lineCap = "round";
+  ctx.beginPath();
+  outline.forEach(([x, z], i) => { const X = ox + x * k, Y = oz + z * k; if (i === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y); });
+  ctx.closePath();
+  ctx.strokeStyle = "rgba(255,255,255,0.14)"; ctx.lineWidth = 8; ctx.stroke();
+  ctx.strokeStyle = accent; ctx.lineWidth = 3.2; ctx.stroke();
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath(); ctx.arc(ox + outline[0][0] * k, oz + outline[0][1] * k, 4.2, 0, Math.PI * 2); ctx.fill();
+}
+
+function renderTrackCards() {
+  trackList.innerHTML = "";
+  for (const T of listTracks()) {
+    const theme = getTheme(T.themeId);
+    const pv = getTrackPreview(T.id);
+    const best = prog.loadBest(T.id);
+    const el = document.createElement("div");
+    el.className = "track-card" + (T.id === state.trackId ? " selected" : "");
+    el.dataset.id = T.id;
+    el.style.setProperty("--card-accent", theme.accent);
+    el.setAttribute("role", "option");
+    el.innerHTML = `
+      <canvas class="track-outline"></canvas>
+      <h3 class="track-name"></h3>
+      <p class="track-place"></p>
+      <div class="track-chips"><span class="track-chip weather"></span><span class="track-chip diff"></span></div>
+      <div class="track-stats"><span class="ts-len"></span><span class="ts-laps"></span></div>
+      <div class="track-best"></div>`;
+    el.querySelector(".track-name").textContent = T.name;
+    el.querySelector(".track-place").textContent = T.place;
+    el.querySelector(".weather").textContent = T.weatherLabel;
+    el.querySelector(".diff").textContent = T.difficulty;
+    el.querySelector(".ts-len").textContent = `${(pv.length / 1000).toFixed(2)} km`;
+    el.querySelector(".ts-laps").textContent = `${T.laps} laps`;
+    el.querySelector(".track-best").textContent = best.lap != null ? `Best lap ${ui.formatTime(best.lap)}` : "No lap set yet";
+    el.addEventListener("click", () => selectTrack(T.id));
+    el.addEventListener("dblclick", () => goTo("race"));
+    trackList.appendChild(el);
+    drawTrackOutline(el.querySelector("canvas"), pv.outline, theme.accent);
+  }
+  const chip = document.getElementById("track-car-chip");
+  if (chip) chip.textContent = getCar(state.carId).name;
+}
+
+function selectTrack(id) {
+  state.trackId = getTrack(id).id;
+  for (const el of trackList.children) el.classList.toggle("selected", el.dataset.id === state.trackId);
+}
+function moveTrackSelection(dir) {
+  const ids = listTracks().map((t) => t.id);
+  const i = Math.max(0, ids.indexOf(state.trackId));
+  selectTrack(ids[(i + dir + ids.length) % ids.length]);
+}
+
+document.getElementById("btn-race").addEventListener("click", () => goTo("tracks"));
+document.getElementById("btn-tracks-go").addEventListener("click", () => goTo("race"));
+document.getElementById("btn-tracks-back").addEventListener("click", () => goTo("select"));
+document.addEventListener("keydown", (e) => {
+  if (state.screen !== "tracks") return;
+  const k = e.code || e.key; // e.code is empty for some synthetic/IME keys; e.key is always set
+  if (k === "ArrowLeft") { e.preventDefault(); moveTrackSelection(-1); }
+  else if (k === "ArrowRight") { e.preventDefault(); moveTrackSelection(1); }
+  else if (k === "Enter" || k === "NumpadEnter") { e.preventDefault(); goTo("race"); }
+  else if (k === "Escape") { e.preventDefault(); goTo("select"); }
+});
 document.getElementById("btn-signout").addEventListener("click", async () => {
   await auth.signOut();
   ui.setLoginStatus(authUnavailableReason, authUnavailableReason ? "warn" : "");
@@ -637,10 +717,26 @@ function setLobbyBusy(busy) {
   for (const b of lobbyButtons) b.disabled = busy;
 }
 function mpProfile() {
-  return { name: state.player.name, carId: state.carId };
+  return { name: state.player.name, carId: state.carId, trackId: state.trackId };
+}
+
+// Host-only track picker in the lobby menu (joiners see the host's track, read-only, in the room panel).
+const lobbyPicker = document.getElementById("lobby-track-picker");
+function renderLobbyTrackPicker() {
+  lobbyPicker.innerHTML = "";
+  for (const T of listTracks()) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "track-pick" + (T.id === state.trackId ? " selected" : "");
+    b.style.setProperty("--card-accent", getTheme(T.themeId).accent);
+    b.textContent = T.name;
+    b.addEventListener("click", () => { state.trackId = T.id; renderLobbyTrackPicker(); });
+    lobbyPicker.appendChild(b);
+  }
 }
 
 document.getElementById("btn-multiplayer").addEventListener("click", () => {
+  renderLobbyTrackPicker();
   ui.showLobbyPanel("menu");
   ui.setStatus("lobby-status", "");
   goTo("lobby");
@@ -728,6 +824,7 @@ mp.onRoomChange((view, reason) => {
 
   if (state.screen === "lobby") {
     ui.renderRoom(view, getCar, mp.MAX_PLAYERS, mp.MIN_PLAYERS);
+    ui.setRoomTrack(getTrack(view.trackId).name);
     if (view.status === "racing" && view.raceStartAt) {
       // Everyone counts down to the same server timestamp, not to when the
       // "go" message happened to arrive.
@@ -798,7 +895,13 @@ const WARMUP_MAX_MS = 5000;
 async function startRace() {
   teardownRace();
   ui.setLoading("Loading race...");
-  ui.setHudLap(1, getTrack(state.trackId).laps);
+  // Solo: the track chosen on the track-select screen. Online: the HOST's track (room.trackId), so every
+  // client loads the same circuit; an unknown id falls back to the default track with a visible message.
+  const room = mp.getRoom();
+  if (room && room.trackId && getTrack(room.trackId).id !== room.trackId) ui.toast("Unknown track in room - loading Green Valley", "warn", 3500);
+  const raceTrackId = room ? getTrack(room.trackId).id : state.trackId;
+  ui.setHudLap(1, getTrack(raceTrackId).laps);
+  ui.setHudTrack(getTrack(raceTrackId).name);
   ui.setHudTime(0);
   ui.setHudSpeed(0);
   ui.setHudBest(null);
@@ -808,7 +911,7 @@ async function startRace() {
   await new Promise((res) => { requestAnimationFrame(() => setTimeout(res, 0)); setTimeout(res, 120); });
   if (state.screen !== "race") return;
 
-  const t = ensureTrack();
+  const t = ensureTrack(raceTrackId);
   const pickups = ensurePickups(t);
   pickups.reset();
   pmark("track-ready");
@@ -943,6 +1046,13 @@ function finishRace() {
   teardownRace();
   state.lastRaceOnline = online;
   ui.renderResults(state.player, laps);
+  try {
+    ui.setResultsTrack(`${r.track.name} - ${r.track.weatherLabel}`);
+    if (laps.length) {
+      const b = prog.saveBest(r.track.id, Math.min(...laps), finished ? laps.reduce((a, c) => a + c, 0) : NaN);
+      if (b.newLap) ui.toast(`New best lap on ${r.track.name}: ${ui.formatTime(b.lap)}`, "ok", 3600);
+    }
+  } catch (err) { console.warn("[best]", err); }
   // Progression: the ONE place XP/coins are awarded. Only for a completed race.
   let progressData = null;
   if (finished) {
@@ -1348,6 +1458,7 @@ function goTo(screen) {
   state.screen = ui.showScreen(screen);
   keys.clear();
   if (screen === "select" || screen === "lobby") schedulePrewarm();
+  if (screen === "tracks") renderTrackCards();
   if (screen === "select") { renderCarCards(); refreshCoins(); setShowcaseCar(skinnedCar(getCar(state.carId))); }
   if (screen === "garage") renderGarage();
   if (screen === "race") { pmark("click"); startRace(); }
@@ -1380,7 +1491,7 @@ function frame() {
     camera.position.set(Math.sin(t * 0.12) * 2.5, 2.6 + Math.sin(t * 0.3) * 0.3, 8.5);
     // On car-select the card strip owns the bottom of the screen, so aim lower to
     // lift the hero car up into the clear middle.
-    camera.lookAt(0, state.screen === "select" ? -0.35 : 0.7, 0);
+    camera.lookAt(0, state.screen === "select" || state.screen === "tracks" ? -0.35 : 0.7, 0);
     renderer.render(showcaseScene, camera);
   }
   requestAnimationFrame(frame);

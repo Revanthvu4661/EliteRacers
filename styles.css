@@ -166,6 +166,44 @@ kbd {
 .stat-bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,0.08); overflow: hidden; }
 .stat-bar > i { display: block; height: 100%; background: var(--accent-2); }
 
+/* ---------- Track select ---------- */
+#screen-tracks { justify-content: flex-end; }
+.track-list { display: flex; gap: clamp(8px, 1.6vw, 20px); justify-content: center; flex-wrap: nowrap; padding: 0 12px; margin-bottom: 100px; max-width: 100vw; }
+.track-card {
+  --card-accent: var(--accent);
+  width: clamp(180px, calc((100vw - 72px) / 3), 280px); padding: 14px 16px 12px; flex: none; cursor: pointer; min-width: 0;
+  background: var(--panel); border: 1px solid var(--panel-border);
+  border-radius: var(--radius); backdrop-filter: blur(14px);
+  opacity: 0.62; transform: scale(0.95);
+  transition: transform 260ms cubic-bezier(.2,.8,.2,1), opacity 260ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+.track-card:hover:not(.selected) { opacity: 0.85; }
+.track-card.selected { opacity: 1; transform: scale(1.04); border-color: var(--card-accent); box-shadow: 0 0 0 1px var(--card-accent), 0 14px 44px rgba(0,0,0,0.55); }
+.track-outline { display: block; width: 100%; height: 108px; border-radius: 8px; background: rgba(0,0,0,0.28); margin-bottom: 10px; }
+.track-name { font-family: var(--font-display); font-weight: 700; font-size: 17px; letter-spacing: 1px; margin: 0 0 2px; }
+.track-place { font-size: 12px; color: var(--muted); margin: 0 0 8px; }
+.track-chips { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+.track-chip { font-size: 11px; letter-spacing: 1px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--panel-border); background: rgba(255,255,255,0.05); }
+.track-chip.weather { color: var(--card-accent); border-color: var(--card-accent); }
+.track-stats { display: flex; gap: 14px; font-size: 12px; color: #cfd5e3; font-variant-numeric: tabular-nums; }
+.track-best { margin-top: 6px; font-size: 12px; color: var(--accent-2); font-variant-numeric: tabular-nums; min-height: 16px; }
+@media (max-height: 700px) {
+  .track-outline { height: 74px; margin-bottom: 6px; }
+  .track-card { padding: 9px 11px 8px; }
+  .track-name { font-size: 15px; }
+  .track-place { margin-bottom: 5px; }
+  .track-chips { margin-bottom: 5px; }
+  .track-list { margin-bottom: 86px; }
+}
+@media (max-width: 860px) { .track-chip { font-size: 10px; padding: 2px 7px; } .track-stats { gap: 8px; font-size: 11px; } }
+.track-picker { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 6px; }
+.track-pick { font-size: 12px; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--panel-border); background: rgba(255,255,255,0.05); color: var(--text); cursor: pointer; font-family: var(--font-body); }
+.track-pick.selected { border-color: var(--card-accent, var(--accent)); box-shadow: 0 0 0 1px var(--card-accent, var(--accent)); }
+.lobby-track-label { margin: 4px 0 0; letter-spacing: 2px; font-size: 11px; }
+.room-track { margin: 6px 0 2px; text-align: center; font-family: var(--font-display); letter-spacing: 2px; font-size: 13px; color: var(--accent-2); }
+.results-track { margin: -12px 0 14px; font-family: var(--font-display); letter-spacing: 2px; font-size: 12px; color: var(--accent-2); }
+.hud-track { font-size: 11px; letter-spacing: 2px; color: #cfd5e3; margin-top: 3px; text-transform: uppercase; }
+
 /* ---------- Multiplayer lobby ---------- */
 .lobby-card {
   width: min(440px, calc(100vw - 32px));

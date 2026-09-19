@@ -5,7 +5,7 @@
 
 const $ = (sel) => document.querySelector(sel);
 
-export const SCREENS = ["login", "select", "lobby", "garage", "race", "results"];
+export const SCREENS = ["login", "select", "tracks", "lobby", "garage", "race", "results"];
 let activeScreen = "login";
 
 /** Cross-fade to a screen. Returns the screen name. */
@@ -177,6 +177,10 @@ export function setHudBanner(text) {
   if (el.textContent !== t) el.textContent = t;
   if (el.hidden !== !t) el.hidden = !t;
 }
+
+export function setHudTrack(name) { $("#hud-track").textContent = name || ""; }
+export function setResultsTrack(text) { $("#results-track").textContent = text || ""; }
+export function setRoomTrack(name) { $("#room-track").textContent = name ? `TRACK: ${name}` : ""; }
 
 export function setHudCamera(mode) {
   $("#hud-cam").textContent = mode.toUpperCase();
