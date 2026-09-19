@@ -11,20 +11,20 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=35";
-import * as ui from "./ui.js?v=35";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=35";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=35";
-import { buildTrack, TRACK_CONFIG, gridOffsets } from "./track.js?v=35";
-import { createCameraRig } from "./camera.js?v=35";
-import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=35";
-import { commentate } from "./ai-commentary.js?v=35";
-import * as mp from "./multiplayer.js?v=35";
-import { createPickups } from "./pickups.js?v=35";
-import { createMinimap } from "./minimap.js?v=35";
-import { createSpeedometer } from "./speedometer.js?v=35";
-import * as prog from "./progression.js?v=35";
-import * as audio from "./audio.js?v=35";
+import * as auth from "./auth.js?v=36";
+import * as ui from "./ui.js?v=36";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=36";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=36";
+import { buildTrack, TRACK_CONFIG, gridOffsets } from "./track.js?v=36";
+import { createCameraRig } from "./camera.js?v=36";
+import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=36";
+import { commentate } from "./ai-commentary.js?v=36";
+import * as mp from "./multiplayer.js?v=36";
+import { createPickups } from "./pickups.js?v=36";
+import { createMinimap } from "./minimap.js?v=36";
+import { createSpeedometer } from "./speedometer.js?v=36";
+import * as prog from "./progression.js?v=36";
+import * as audio from "./audio.js?v=36";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera
@@ -1248,7 +1248,7 @@ function frame() {
 // Boot
 // ---------------------------------------------------------------------------
 // Dev handle for the console / automated checks (harmless in the demo).
-window.ER = { state, cameraRig, TUNING, keys, camera, THREE, mp, remotes, computeLeaderboard, computeResultsBoard, updateRace, hudBanner, showcase, prog, renderer, raceScene, dumpHero, gridPoseFor, gridOffsets, audio };
+window.ER = { state, cameraRig, TUNING, keys, camera, THREE, mp, remotes, computeLeaderboard, computeResultsBoard, updateRace, hudBanner, showcase, prog, renderer, raceScene, dumpHero, gridPoseFor, gridOffsets, audio, updateRemotesFromView };
 
 // WebGL context loss (GPU reset, driver hiccup, tab throttling): keep the page alive and
 // rebuild what lives in GPU memory that three.js can't restore on its own - the PMREM

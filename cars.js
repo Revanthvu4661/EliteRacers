@@ -13,7 +13,11 @@
 //               Any load failure / 404 / timeout falls back to the tinted Ferrari.
 //   paintMaterial  name of the model's body-paint material (re-tinted with `color`).
 //               null => tint-disabled: the model keeps its own livery ("Stock only").
-//   fit         { flip: bool (180deg if the nose points the wrong way), hideMaterials: [] }
+//   modelYaw    radians (0 or Math.PI): yaw of the real model inside its wrapper so its NOSE ends up
+//               at model-frame -Z (the loader's forward; main.js then maps -Z onto the physics +X).
+//               All three Sketchfab models are authored nose-at-+Z, so each needs Math.PI.
+//               Wrapper-level only: physics, camera, controls and wrong-way logic never see it.
+//   fit         { hideMaterials: [] } extra per-model cleanup
 //   scale       uniform scale applied to the loaded model
 //   color       hex paint colour (applied to the "body" mesh) + UI swatch
 //   stats       0..1 values shown on the select screen AND fed into physics.js
@@ -27,7 +31,8 @@ export const CARS = [
     name: "VIPER GT",
     model: "./assets/models/ferrari-458-spider.glb",
     paintMaterial: "Vehicle_Exterior_mm_ext",
-    fit: { flip: false }, // nose already at -Z (verified in-race)
+    modelYaw: Math.PI, // nose authored at +Z (cabin/windows sit toward +Z on this mid-engine car)
+    fit: {},
     scale: 1,
     color: 0xd91e2a,
     stats: { topSpeed: 0.95, acceleration: 0.7, handling: 0.55 },
@@ -39,7 +44,8 @@ export const CARS = [
     name: "KESTREL",
     model: "./assets/models/huracan.glb",
     paintMaterial: null, // carbon/livery race car - no single painted-body material: tint-disabled
-    fit: { flip: true },
+    modelYaw: Math.PI, // nose authored at +Z (rear plate is at -Z)
+    fit: {},
     scale: 1,
     color: 0x1f6fe8,
     stats: { topSpeed: 0.7, acceleration: 0.75, handling: 0.95 },
@@ -51,7 +57,8 @@ export const CARS = [
     name: "BRAWLER",
     model: "./assets/models/bugatti-eb110.glb",
     paintMaterial: "Bugatti_EB110SS_By_Alex_Ka",
-    fit: { flip: true, hideMaterials: ["floor", "carshadow", "red_carpet"] }, // the asset ships with a floor, shadow plane and display carpet
+    modelYaw: Math.PI, // nose authored at +Z (exhaust is at -Z)
+    fit: { hideMaterials: ["floor", "carshadow", "red_carpet"] }, // the asset ships with a floor, shadow plane and display carpet
     scale: 1,
     color: 0xf2b700,
     stats: { topSpeed: 0.8, acceleration: 0.95, handling: 0.65 },

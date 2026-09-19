@@ -125,7 +125,7 @@ export function loadCarModelQuick(carConfig, maxWaitMs, onLate) {
 // Real car models (Task 7). None of the shipped GLBs use the body/wheel_* node
 // contract, so: recentre on the bounding box, scale so the long axis matches the
 // Ferrari's raw length (VISUAL_SCALE is then applied on top, exactly like the
-// Ferrari path), sit min-y on the ground, optional 180deg flip. Wheels are baked
+// Ferrari path), sit min-y on the ground, per-car modelYaw. Wheels are baked
 // into the mesh (static); the physics-facing wheel layout is copied from the
 // Ferrari so the chassis box / raycast layout - and therefore handling - are
 // identical to the tinted-Ferrari car. Nothing in physics.js changes.
@@ -189,7 +189,9 @@ function instantiateReal(template, carConfig, ferrariTemplate) {
   const orient = new THREE.Group();
   orient.add(root);
   if (size.x > size.z) orient.rotation.y = Math.PI / 2; // long axis onto Z (model frame faces -Z)
-  if (fit.flip) orient.rotation.y += Math.PI;
+  // Per-car yaw (cars.js modelYaw) - applied on the model's own wrapper, AFTER the model is
+  // centred (root.position above) and BEFORE the scale group / chassis group it is added to.
+  orient.rotation.y += Number(carConfig.modelYaw) || 0;
   const fitted = new THREE.Group();
   fitted.scale.setScalar(scale);
   fitted.add(orient);
