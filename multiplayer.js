@@ -31,7 +31,7 @@
 // failure surfaces as a message so the UI can offer solo play instead.
 // ============================================================================
 
-import { getFirebaseApp, ensureFirebaseUid } from "./auth.js?v=30";
+import { getFirebaseApp, ensureFirebaseUid } from "./auth.js?v=32";
 
 const SDK_URL = "https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js";
 
@@ -137,6 +137,24 @@ function playerNode(profile) {
   };
 }
 
+/** Deterministic grid order: uids sorted by joinedAt, then uid. Pure. */
+export function orderUids(players) {
+  return [...players]
+    .sort((a, b) => ((a.joinedAt || 0) - (b.joinedAt || 0)) || (a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0))
+    .map((p) => p.uid);
+}
+
+/**
+ * Grid slot for `uid` in a room view: the host-written `order` (identical on every client)
+ * when it is present and lists this uid, otherwise derived from the players known now with
+ * the same sort. Returns -1 only if the uid isn't in the room at all. Pure.
+ */
+export function slotFor(view, uid) {
+  if (!view) return -1;
+  const order = Array.isArray(view.order) && view.order.includes(uid) ? view.order : orderUids(view.players || []);
+  return order.indexOf(uid);
+}
+
 function buildView(code, data) {
   const players = Object.entries(data.players || {})
     .map(([id, p]) => ({ uid: id, name: p.name, carId: p.carId, joinedAt: p.joinedAt || 0,
@@ -149,6 +167,7 @@ function buildView(code, data) {
     isHost: data.hostId === uid,
     hostPresent: players.some((p) => p.isHost),
     raceStartAt: data.raceStartAt || null,
+    order: Array.isArray(data.order) ? data.order : (data.order && typeof data.order === "object" ? Object.values(data.order) : null),
     players,
     results: data.results || null,
     raw: data,
@@ -264,7 +283,9 @@ export async function startRoomRace() {
     // re-register this player's own cleanup right after).
     await fb.onDisconnect(room.roomRef).cancel();
     await fb.onDisconnect(room.playerRef).remove();
-    await fb.update(room.roomRef, { status: "racing", raceStartAt: serverNow() + START_DELAY_MS });
+    // `order` is written in the SAME update as the start flag, so every client that sees
+    // "racing" also sees the grid order (used by main.js for spawn slots).
+    await fb.update(room.roomRef, { status: "racing", raceStartAt: serverNow() + START_DELAY_MS, order: orderUids(v.players) });
   } catch (err) {
     console.warn("[mp] startRoomRace:", err);
     throw new Error(friendly(err, "Couldn't start the race."));

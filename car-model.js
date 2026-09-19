@@ -165,6 +165,12 @@ function instantiateReal(template, carConfig, ferrariTemplate) {
     o.castShadow = true;
     o.receiveShadow = false;
     if (carConfig.paintMaterial && mname === carConfig.paintMaterial) o.material = paint;
+    else if (Array.isArray(o.material)) o.material = o.material.map((m) => m.clone());
+    else if (o.material) o.material = o.material.clone();
+    // ^ Object3D.clone() shares materials with the cached template. Anything that mutates a
+    //   material (the hero car's swap fade) would then leak into every other instance of the
+    //   same model - the race car included - so each instance gets its own copies. Textures
+    //   and geometry stay shared (cloning a material copies the texture reference only).
     box.expandByObject(o, true);
   });
   if (box.isEmpty()) return null;

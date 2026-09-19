@@ -11,19 +11,19 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=30";
-import * as ui from "./ui.js?v=30";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=30";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=30";
-import { buildTrack, TRACK_CONFIG } from "./track.js?v=30";
-import { createCameraRig } from "./camera.js?v=30";
-import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=30";
-import { commentate } from "./ai-commentary.js?v=30";
-import * as mp from "./multiplayer.js?v=30";
-import { createPickups } from "./pickups.js?v=30";
-import { createMinimap } from "./minimap.js?v=30";
-import { createSpeedometer } from "./speedometer.js?v=30";
-import * as prog from "./progression.js?v=30";
+import * as auth from "./auth.js?v=32";
+import * as ui from "./ui.js?v=32";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=32";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=32";
+import { buildTrack, TRACK_CONFIG, gridOffsets } from "./track.js?v=32";
+import { createCameraRig } from "./camera.js?v=32";
+import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=32";
+import { commentate } from "./ai-commentary.js?v=32";
+import * as mp from "./multiplayer.js?v=32";
+import { createPickups } from "./pickups.js?v=32";
+import { createMinimap } from "./minimap.js?v=32";
+import { createSpeedometer } from "./speedometer.js?v=32";
+import * as prog from "./progression.js?v=32";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera
@@ -49,7 +49,7 @@ window.addEventListener("resize", () => {
 
 // Cheap image-based lighting so car paint and glass have something to reflect.
 const pmrem = new THREE.PMREMGenerator(renderer);
-const envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+let envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
 // ---------------------------------------------------------------------------
 // Showcase scene (login / select / results backdrop)
@@ -89,32 +89,87 @@ let showcaseCar = null;
 let showcaseToken = 0;
 const SHOWCASE_FADE_MS = 280;
 
-/** Cross-fade the hero car: new one fades in over the old, which is then removed.
- *  Materials are per-instance (car-model.js clones them), so mutating opacity is safe. */
+// Hero-car swap fade. Idempotent by construction: each material's REST opacity/transparent
+// is recorded once (before anything ever touches it) in material.userData, every swap first
+// FINISHES any fade still running (new car back to rest values, old car removed), and a
+// timeout guarantees completion even if requestAnimationFrame is throttled. Rapid card
+// switching used to capture mid-fade values as "rest" and leave the car at opacity 0
+// (invisible, while its shadow still rendered).
+let fadeJob = null;
+const heroMaterials = (obj) => {
+  const set = new Set();
+  obj.traverse((o) => { if (o.isMesh && o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((x) => set.add(x)); });
+  return [...set];
+};
+const rememberRest = (m) => { if (m.userData.restOpacity === undefined) { m.userData.restOpacity = m.opacity; m.userData.restTransparent = m.transparent; } };
+const restoreRest = (m) => { if (m.userData.restOpacity !== undefined) { m.opacity = m.userData.restOpacity; m.transparent = m.userData.restTransparent; } };
+
+function finishFade() {
+  const j = fadeJob;
+  if (!j) return;
+  fadeJob = null;
+  j.nm.forEach(restoreRest);
+  j.newCar.visible = true;
+  if (j.oldCar && j.oldCar !== j.newCar) showcase.remove(j.oldCar);
+}
+
 function fadeSwapShowcase(oldCar, newCar) {
-  const mats = (obj) => { const m = []; obj.traverse((o) => { if (o.isMesh && o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((x) => m.push(x)); }); return m; };
-  const fresh = mats(newCar).map((m) => ({ m, opacity: m.opacity, transparent: m.transparent }));
-  const stale = oldCar ? mats(oldCar).map((m) => ({ m, opacity: m.opacity })) : [];
-  if (oldCar) oldCar.userData.fadeCancelled = true;
-  fresh.forEach((x) => { x.m.transparent = true; x.m.opacity = 0; });
-  const t0 = performance.now();
+  finishFade();
+  const nm = heroMaterials(newCar);
+  const om = oldCar ? heroMaterials(oldCar) : [];
+  nm.forEach(rememberRest);
+  om.forEach(rememberRest);
+  nm.forEach((m) => { m.transparent = true; m.opacity = 0; });
+  const job = { oldCar, newCar, nm, om, t0: performance.now() };
+  fadeJob = job;
+  setTimeout(() => { if (fadeJob === job) finishFade(); }, SHOWCASE_FADE_MS + 600);
   (function tick() {
-    if (newCar.userData.fadeCancelled) { if (oldCar) showcase.remove(oldCar); return; }
-    const k = Math.min(1, (performance.now() - t0) / SHOWCASE_FADE_MS);
-    fresh.forEach((x) => { x.m.opacity = x.opacity * k; });
-    stale.forEach((x) => { x.m.transparent = true; x.m.opacity = x.opacity * (1 - k); });
+    if (fadeJob !== job) return;
+    const k = Math.min(1, (performance.now() - job.t0) / SHOWCASE_FADE_MS);
+    nm.forEach((m) => { m.opacity = m.userData.restOpacity * k; });
+    om.forEach((m) => { m.transparent = true; m.opacity = m.userData.restOpacity * (1 - k); });
     if (k < 1) { requestAnimationFrame(tick); return; }
-    fresh.forEach((x) => { x.m.opacity = x.opacity; x.m.transparent = x.transparent; });
-    if (oldCar) showcase.remove(oldCar);
+    finishFade();
   })();
+}
+
+let showcaseLoading = 0;
+let lastHealAt = 0;
+/** Self-heal, run ~every 1.5 s while a menu screen is up: whatever went wrong (stuck fade,
+ *  lost car, stale async load), the hero ends up present, visible and at rest opacity. */
+function healShowcase(now) {
+  if (now - lastHealAt < 1500) return;
+  lastHealAt = now;
+  if (fadeJob) return;
+  if (!showcaseCar || !showcaseCar.parent) {
+    if (!showcaseLoading) setShowcaseCar(skinnedCar(getCar(state.carId)));
+    return;
+  }
+  showcaseCar.visible = true;
+  for (const m of heroMaterials(showcaseCar)) restoreRest(m);
+}
+
+/** Debug: every mesh material under the hero car. */
+function dumpHero() {
+  const rows = [];
+  showcase.traverse((o) => {
+    if (!o.isMesh) return;
+    (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => rows.push({ vis: o.visible, op: +m.opacity.toFixed(2), tr: m.transparent, name: (m.name || "").slice(0, 20) }));
+  });
+  return {
+    children: showcase.children.length, meshes: rows.length, hidden: rows.filter((r) => !r.vis).length,
+    opacityNearZero: rows.filter((r) => r.op < 0.05).length, ctxLost: renderer.getContext().isContextLost(),
+    sample: rows.filter((r) => r.op < 0.99).slice(0, 4),
+  };
 }
 
 const carLoadingEl = document.getElementById("car-loading");
 async function setShowcaseCar(carConfig) {
   const token = ++showcaseToken;
   const hint = setTimeout(() => { if (token === showcaseToken) carLoadingEl.hidden = false; }, 150);
-  const model = await loadCarModel(carConfig);
-  clearTimeout(hint);
+  showcaseLoading++;
+  let model;
+  try { model = await loadCarModel(carConfig); } finally { showcaseLoading--; clearTimeout(hint); }
   if (token !== showcaseToken) return; // a newer selection won
   carLoadingEl.hidden = true;
   const previous = showcaseCar;
@@ -226,7 +281,7 @@ function disposePuppet(root) {
 /** Create (if needed) a loading placeholder for uid; the model loads async and
  *  the puppet becomes visible once both the model is ready AND a first state
  *  update has arrived (so it never flashes at the world origin). */
-function ensureRemotePuppet(uid, name, carId) {
+function ensureRemotePuppet(uid, name, carId, initial) {
   let r = remotes.get(uid);
   if (r) return r;
   r = {
@@ -235,6 +290,14 @@ function ensureRemotePuppet(uid, name, carId) {
     to: { p: new THREE.Vector3(), q: new THREE.Quaternion() },
     tStart: performance.now(), hasState: false,
   };
+  // Start on that racer's grid slot (same slot function as the local car) so the puppet is
+  // already in the right place before its first network sample arrives.
+  if (initial) {
+    r.to.p.set(initial.position.x, 0.6, initial.position.z);
+    r.to.q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), initial.yaw);
+    r.from.p.copy(r.to.p); r.from.q.copy(r.to.q);
+    r.hasState = true;
+  }
   remotes.set(uid, r);
   const attach = (model) => {
     if (remotes.get(uid) !== r) return; // removed (or replaced) while the model was loading
@@ -272,6 +335,16 @@ function removeRemotePuppet(uid) {
   if (r.root) { raceScene.remove(r.root); disposePuppet(r.root); }
 }
 
+/** Grid spawn pose for `uid` in a room view - the ONE slot function used for the local
+ *  car and for every remote puppet. Pure given (track, view, uid). */
+function gridPoseFor(t, view, uid) {
+  let slot = mp.slotFor(view, uid);
+  if (slot < 0) slot = view.players.length; // not listed (shouldn't happen): last row
+  const g = gridOffsets(slot);
+  const pose = t.startPose(g.back, g.lateral);
+  return { slot: g.slot, position: pose.position, yaw: pose.yaw, back: g.back, lateral: g.lateral };
+}
+
 /** Called from every room update while state.screen === "race": builds/updates/
  *  removes puppets for every OTHER player currently in the room. Symmetric by
  *  construction - runs identically on the host's and every guest's client, each
@@ -281,7 +354,9 @@ function updateRemotesFromView(view) {
   for (const p of view.players) {
     if (p.isMe) continue;
     seen.add(p.uid);
-    const r = ensureRemotePuppet(p.uid, p.name, p.carId);
+    let initial = null;
+    try { if (track && view.status === "racing") initial = gridPoseFor(track, view, p.uid); } catch (_) { /* fall back to network state only */ }
+    const r = ensureRemotePuppet(p.uid, p.name, p.carId, initial);
     if (p.state) applyRemoteState(r, p.state);
   }
   for (const uid of [...remotes.keys()]) if (!seen.has(uid)) removeRemotePuppet(uid);
@@ -671,7 +746,15 @@ async function startRace() {
   world.addEventListener("postStep", syncWheelVisuals);
 
   const online = !!mp.getRoom();
-  const pose = t.startPose(7);
+  let pose = t.startPose(7); // solo: unchanged
+  let slot = 0;
+  if (online) {
+    try {
+      const g = gridPoseFor(t, mp.getRoom(), mp.getUid());
+      pose = g; slot = g.slot;
+    } catch (err) { console.warn("[grid] slot lookup failed, using default spawn", err); }
+    console.log(`[grid] uid=${mp.getUid()} slot=${slot} pos=(${pose.position.x.toFixed(1)}, ${pose.position.z.toFixed(1)}) order=${JSON.stringify(mp.getRoom()?.order || null)}`);
+  }
   veh.reset(pose.position, pose.yaw);
 
   // Recreated per race (like the car rig above) so pickup availability always
@@ -1111,6 +1194,7 @@ function frame() {
     renderer.render(raceScene, camera);
   } else {
     showcase.rotation.y += dt * 0.45;
+    try { healShowcase(performance.now()); } catch (_) { /* menu only */ }
     const t = clock.elapsedTime;
     camera.fov = 45;
     camera.updateProjectionMatrix();
@@ -1127,7 +1211,25 @@ function frame() {
 // Boot
 // ---------------------------------------------------------------------------
 // Dev handle for the console / automated checks (harmless in the demo).
-window.ER = { state, cameraRig, TUNING, keys, camera, THREE, mp, remotes, computeLeaderboard, computeResultsBoard, updateRace, hudBanner, showcase, prog, renderer, raceScene };
+window.ER = { state, cameraRig, TUNING, keys, camera, THREE, mp, remotes, computeLeaderboard, computeResultsBoard, updateRace, hudBanner, showcase, prog, renderer, raceScene, dumpHero, gridPoseFor, gridOffsets };
+
+// WebGL context loss (GPU reset, driver hiccup, tab throttling): keep the page alive and
+// rebuild what lives in GPU memory that three.js can't restore on its own - the PMREM
+// environment map (reflections) - then rebuild the hero car.
+canvas.addEventListener("webglcontextlost", (e) => { e.preventDefault(); console.warn("[gl] context lost"); });
+canvas.addEventListener("webglcontextrestored", () => {
+  console.warn("[gl] context restored - rebuilding");
+  try {
+    envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    showcaseScene.environment = envMap;
+    raceScene.environment = envMap;
+  } catch (err) { console.warn("[gl] env rebuild failed", err); }
+  try {
+    finishFade();
+    if (showcaseCar) { showcase.remove(showcaseCar); showcaseCar = null; }
+    setShowcaseCar(skinnedCar(getCar(state.carId)));
+  } catch (err) { console.warn("[gl] hero rebuild failed", err); }
+});
 
 preloadCarAssets();
 setShowcaseCar(getCar(state.carId));

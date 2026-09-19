@@ -51,6 +51,18 @@ export const TRACK_POINTS = [
   [-15, -160], [-100, -140], [-150, -70], [-135, 10], [-105, 32],
 ].map(([x, z]) => [x * SCALE, z * SCALE]);
 
+// Starting grid (multiplayer): 2 columns, rows BEHIND the start line along the track
+// tangent, up to 8 slots. Spacing is larger than the 6 m / 3.5 m minimum on purpose: the
+// rendered cars are ~7 m long (VISUAL_SCALE 1.4) and ~3.2 m wide, so 6 m rows / 3.5 m
+// columns would still visually overlap. Pure - no THREE, no track state.
+export const GRID = { firstBackM: 7, rowM: 9, colM: 5, maxSlots: 8 };
+export function gridOffsets(slot) {
+  const s = Math.max(0, Math.min(GRID.maxSlots - 1, Math.floor(Number.isFinite(slot) ? slot : 0)));
+  const row = s >> 1, col = s & 1;
+  // lateral: + = left of travel (same sign convention as startPose's `lateral`).
+  return { slot: s, back: GRID.firstBackM + row * GRID.rowM, lateral: (col === 0 ? -1 : 1) * GRID.colM / 2 };
+}
+
 // Boost pickup spawn points (Task 1): fixed fractions around the loop (u, same
 // convention as sampleAt/checkpoints), picked once here rather than randomised per
 // frame. Deliberately offset from the checkpoint gates (0, 0.25, 0.5, 0.75) and the
