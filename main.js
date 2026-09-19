@@ -11,19 +11,19 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=28";
-import * as ui from "./ui.js?v=28";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=28";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=28";
-import { buildTrack, TRACK_CONFIG } from "./track.js?v=28";
-import { createCameraRig } from "./camera.js?v=28";
-import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=28";
-import { commentate } from "./ai-commentary.js?v=28";
-import * as mp from "./multiplayer.js?v=28";
-import { createPickups } from "./pickups.js?v=28";
-import { createMinimap } from "./minimap.js?v=28";
-import { createSpeedometer } from "./speedometer.js?v=28";
-import * as prog from "./progression.js?v=28";
+import * as auth from "./auth.js?v=30";
+import * as ui from "./ui.js?v=30";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=30";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=30";
+import { buildTrack, TRACK_CONFIG } from "./track.js?v=30";
+import { createCameraRig } from "./camera.js?v=30";
+import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=30";
+import { commentate } from "./ai-commentary.js?v=30";
+import * as mp from "./multiplayer.js?v=30";
+import { createPickups } from "./pickups.js?v=30";
+import { createMinimap } from "./minimap.js?v=30";
+import { createSpeedometer } from "./speedometer.js?v=30";
+import * as prog from "./progression.js?v=30";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera
@@ -1127,7 +1127,7 @@ function frame() {
 // Boot
 // ---------------------------------------------------------------------------
 // Dev handle for the console / automated checks (harmless in the demo).
-window.ER = { state, cameraRig, TUNING, keys, camera, THREE, mp, remotes, computeLeaderboard, computeResultsBoard, updateRace, hudBanner, showcase, prog };
+window.ER = { state, cameraRig, TUNING, keys, camera, THREE, mp, remotes, computeLeaderboard, computeResultsBoard, updateRace, hudBanner, showcase, prog, renderer, raceScene };
 
 preloadCarAssets();
 setShowcaseCar(getCar(state.carId));

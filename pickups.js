@@ -29,7 +29,7 @@
 // ============================================================================
 
 import * as THREE from "three";
-import { PICKUP_SPAWN_U, REPAIR_SPAWN_U } from "./track.js?v=28";
+import { PICKUP_SPAWN_U, REPAIR_SPAWN_U } from "./track.js?v=30";
 
 const HOVER_HEIGHT = 1.3;       // m above the road
 const TRIGGER_RADIUS = 3.2;     // m, proximity trigger (generous - arcade feel)
@@ -95,8 +95,20 @@ export function createPickups(scene, track) {
     const mesh = spec.kind === "boost" ? buildBoostMesh() : buildRepairMesh();
     mesh.position.copy(position);
     scene.add(mesh);
-    return { ...spec, position, mesh, available: true, respawnAt: 0, phase: i * 1.7 };
+    // The PointLight must stay VISIBLE for the pickup's whole life: three.js rebuilds
+    // every lit material's shader whenever the number of visible lights changes, which
+    // froze the game for seconds on each collect and each respawn. So "hidden" means
+    // meshes off + light intensity 0 - the light count never changes.
+    const light = mesh.children.find((c) => c.isLight);
+    const parts = mesh.children.filter((c) => !c.isLight);
+    const lightIntensity = light ? light.intensity : 0;
+    return { ...spec, position, mesh, light, parts, lightIntensity, available: true, respawnAt: 0, phase: i * 1.7 };
   });
+
+  function setShown(p, shown) {
+    for (const c of p.parts) c.visible = shown;
+    if (p.light) p.light.intensity = shown ? p.lightIntensity : 0;
+  }
 
   let boostUntil = 0;
   const _rel = new THREE.Vector3();
@@ -112,7 +124,7 @@ export function createPickups(scene, track) {
       // needed, even once this grows a Firebase-backed version (see file header).
       if (!p.available && now > p.respawnAt) {
         p.available = true;
-        p.mesh.visible = true;
+        setShown(p, true);
       }
 
       if (p.available) {
@@ -121,7 +133,7 @@ export function createPickups(scene, track) {
         if (_rel.lengthSq() < TRIGGER_RADIUS * TRIGGER_RADIUS) {
           p.available = false;
           p.respawnAt = now + RESPAWN_MS;
-          p.mesh.visible = false;
+          setShown(p, false);
           if (p.kind === "boost") boostUntil = now + BOOST_MS;
           collected.push({ kind: p.kind });
         }
