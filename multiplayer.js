@@ -31,7 +31,7 @@
 // failure surfaces as a message so the UI can offer solo play instead.
 // ============================================================================
 
-import { getFirebaseApp, ensureFirebaseUid } from "./auth.js?v=46";
+import { getFirebaseApp, ensureFirebaseUid } from "./auth.js?v=47";
 
 const SDK_URL = "https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js";
 

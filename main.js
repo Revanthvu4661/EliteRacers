@@ -11,20 +11,22 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=46";
-import * as ui from "./ui.js?v=46";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=46";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=46";
-import { buildTrack, getTrack, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=46";
-import { createCameraRig } from "./camera.js?v=46";
-import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=46";
-import { commentate } from "./ai-commentary.js?v=46";
-import * as mp from "./multiplayer.js?v=46";
-import { createPickups } from "./pickups.js?v=46";
-import { createMinimap } from "./minimap.js?v=46";
-import { createSpeedometer } from "./speedometer.js?v=46";
-import * as prog from "./progression.js?v=46";
-import * as audio from "./audio.js?v=46";
+import * as auth from "./auth.js?v=47";
+import * as ui from "./ui.js?v=47";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=47";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=47";
+import { buildTrack, getTrack, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=47";
+import { createCameraRig } from "./camera.js?v=47";
+import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=47";
+import { commentate } from "./ai-commentary.js?v=47";
+import * as mp from "./multiplayer.js?v=47";
+import { createPickups } from "./pickups.js?v=47";
+import { createMinimap } from "./minimap.js?v=47";
+import { createEnvironment } from "./themes.js?v=47";
+import { buildScenery } from "./scenery.js?v=47";
+import { createSpeedometer } from "./speedometer.js?v=47";
+import * as prog from "./progression.js?v=47";
+import * as audio from "./audio.js?v=47";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera
@@ -190,18 +192,27 @@ async function setShowcaseCar(carConfig) {
 const raceScene = new THREE.Scene();
 raceScene.environment = envMap;
 const world = createWorld();
+// Sky, sun, hemisphere light, fog and the single headlight are created ONCE here and only have their
+// properties changed per track (env.apply) - lights are never added or removed after this point.
+const env = createEnvironment(raceScene, renderer);
+env.apply("sunny");
 let track = null;
-/** The built track for `id` (rebuilt if a different track was loaded). */
+let scenery = null;
+/** The built track for `id` (rebuilt if a different track was loaded), with its theme + scenery. */
 function ensureTrack(id = state.trackId) {
   if (track && track.id !== id) disposeTrack();
-  if (!track) track = buildTrack(id, world, raceScene);
+  if (!track) {
+    track = buildTrack(id, world, raceScene);
+    env.apply(track.themeId);
+    scenery = buildScenery(track.themeId, track, raceScene);
+  }
   return track;
 }
-/** Free the current track's scene objects, GPU resources and physics bodies. */
+/** Free the current track, its scenery and weather (scene objects, GPU resources, physics bodies). */
 function disposeTrack() {
-  if (!track) return;
-  try { track.dispose(); } catch (err) { console.warn("[track] dispose failed", err); }
-  track = null;
+  if (scenery) { try { scenery.dispose(); } catch (err) { console.warn("[scenery] dispose failed", err); } scenery = null; }
+  if (track) { try { track.dispose(); } catch (err) { console.warn("[track] dispose failed", err); } track = null; }
+  env.apply("sunny"); // menus render with the default exposure
 }
 const cameraRig = createCameraRig(camera);
 
@@ -917,6 +928,8 @@ function teardownRace() {
   refreshBanner();
   try { audio.engineStop(); } catch (_) { /* audio only */ }
   state.race = null;
+  // Leaving the race (quit / finish / back / restart): free the track, its scenery and weather.
+  disposeTrack();
 }
 
 function finishRace() {
@@ -1174,8 +1187,11 @@ function updateRace(dt) {
   // physics step above, for every substep stepWorld() just performed.
 
   // Sun + shadows follow the car.
-  t.sun.position.set(body.position.x + 60, 110, body.position.z + 40);
-  t.sun.target.position.set(body.position.x, 0, body.position.z);
+  try {
+    _fwd.set(1, 0, 0).applyQuaternion(r.rig.root.quaternion);
+    env.update(now, body.position, _fwd);          // sun + headlight follow the car, lightning
+    if (scenery) scenery.update(dt, camera);        // weather particles
+  } catch (_) { /* visual only */ }
 
   // Camera
   cameraRig.update(dt, cameraTarget());
@@ -1374,7 +1390,7 @@ function frame() {
 // Boot
 // ---------------------------------------------------------------------------
 // Dev handle for the console / automated checks (harmless in the demo).
-window.ER = { state, cameraRig, TUNING, keys, camera, THREE, mp, remotes, computeLeaderboard, computeResultsBoard, updateRace, hudBanner, showcase, prog, renderer, raceScene, dumpHero, gridPoseFor, gridOffsets, audio, updateRemotesFromView, perfSummary, ensureTrack, disposeTrack };
+window.ER = { state, cameraRig, TUNING, keys, camera, THREE, mp, remotes, computeLeaderboard, computeResultsBoard, updateRace, hudBanner, showcase, prog, renderer, raceScene, dumpHero, gridPoseFor, gridOffsets, audio, updateRemotesFromView, perfSummary, ensureTrack, disposeTrack, env, getScenery: () => scenery };
 
 // WebGL context loss (GPU reset, driver hiccup, tab throttling): keep the page alive and
 // rebuild what lives in GPU memory that three.js can't restore on its own - the PMREM

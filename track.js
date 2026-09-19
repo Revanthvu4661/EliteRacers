@@ -1,17 +1,17 @@
 // ============================================================================
-// track.js - closed-loop circuit built from a CatmullRom spline.
+// track.js - closed-loop circuits built from CatmullRom splines. A track is DATA (see TRACKS).
 //
-// buildTrack(scene, world) adds to the scene:
-//   sky dome, grass ground, asphalt ribbon with lane markings, red/white curbs,
-//   barriers (with static physics bodies), trees, start/finish line, gates,
-//   a grandstand, and the sun. It returns helpers for lap logic and resets.
-//
-// Everything visual is data-driven from TRACK_POINTS + TRACK_CONFIG. Change the
-// points and the whole circuit (curbs, barriers, gates, colliders) regenerates.
+// buildTrack(id, world, scene) adds to the scene the ground, asphalt ribbon with lane markings,
+// kerbs, barriers (with ONE static compound physics body), start/finish gantry, gates and a
+// grandstand, and returns the helpers every consumer uses (samples, nearest, checkpoints, pickups,
+// startPose, gridSlot, tangentAt, bounds, dispose). The sky, lights, fog, scenery and weather are NOT
+// built here: they belong to the theme system (themes.js / scenery.js), which is created once and
+// only has its properties changed per track. Ground/road/kerb/barrier LOOKS come from the theme.
 // ============================================================================
 
 import * as THREE from "three";
 import * as CANNON from "cannon-es";
+import { getTheme, makeGroundTexture, makeRoadMaterial, hashString } from "./themes.js?v=47";
 
 // ---------------------------------------------------------------------------
 // TRACK DATA. A track is a plain data object; buildTrack(id, ...) turns it into geometry,
@@ -40,7 +40,6 @@ export const TRACK_CONFIG = {
   barrierSpacing: +(4.0 * SCALE).toFixed(2),  // m between barrier segments (legacy; walls now follow the samples)
   barrierOffset: Math.round(6 * SCALE),  // m from road edge to barrier centre - more grass
                          // shoulder to run through before hitting a hard collision
-  treeCount: 260,
   bounds: Math.round(340 * SCALE),          // half-size of grass plane
 };
 
@@ -72,7 +71,6 @@ export const TRACKS = [
     difficulty: "Medium",
     samples: 420,        // ribbon resolution (~4.4 m per sample)
     groundHalf: Math.round(340 * SCALE),
-    treeCount: 260,
   },
 ];
 
@@ -104,51 +102,6 @@ function makeCanvas(w, h) {
   return c;
 }
 
-function asphaltTexture() {
-  const c = makeCanvas(256, 256);
-  const g = c.getContext("2d");
-  g.fillStyle = "#3a3c40";
-  g.fillRect(0, 0, 256, 256);
-  // grain
-  const img = g.getImageData(0, 0, 256, 256);
-  for (let i = 0; i < img.data.length; i += 4) {
-    const n = (Math.random() - 0.5) * 26;
-    img.data[i] += n; img.data[i + 1] += n; img.data[i + 2] += n;
-  }
-  g.putImageData(img, 0, 0);
-  // edge lines (u = 0 and 1 are the road edges)
-  g.fillStyle = "#e8e8e8";
-  g.fillRect(6, 0, 5, 256);
-  g.fillRect(245, 0, 5, 256);
-  // dashed centre line
-  g.fillStyle = "#f2e7b0";
-  g.fillRect(125, 20, 6, 110);
-  const tex = new THREE.CanvasTexture(c);
-  tex.wrapS = THREE.ClampToEdgeWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 8;
-  return tex;
-}
-
-function grassTexture() {
-  const c = makeCanvas(256, 256);
-  const g = c.getContext("2d");
-  g.fillStyle = "#4f8a3a";
-  g.fillRect(0, 0, 256, 256);
-  for (let i = 0; i < 2600; i++) {
-    const v = 60 + Math.random() * 60;
-    g.fillStyle = `rgb(${v * 0.55 | 0}, ${v + 40 | 0}, ${v * 0.45 | 0})`;
-    g.fillRect(Math.random() * 256, Math.random() * 256, 2 + Math.random() * 3, 2 + Math.random() * 3);
-  }
-  const tex = new THREE.CanvasTexture(c);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(90, 90);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 8;
-  return tex;
-}
-
 function checkerTexture(cols = 12, rows = 3) {
   const c = makeCanvas(cols * 16, rows * 16);
   const g = c.getContext("2d");
@@ -163,44 +116,6 @@ function checkerTexture(cols = 12, rows = 3) {
 }
 
 // ---------------------------------------------------------------------------
-// Sky dome: vertex-gradient shader on an inverted sphere.
-// ---------------------------------------------------------------------------
-function makeSky() {
-  const geo = new THREE.SphereGeometry(1400 * SCALE, 32, 16);
-  const mat = new THREE.ShaderMaterial({
-    side: THREE.BackSide,
-    depthWrite: false,
-    fog: false,
-    uniforms: {
-      topColor: { value: new THREE.Color(0x1b3f8f) },
-      midColor: { value: new THREE.Color(0x6fa8e6) },
-      horizonColor: { value: new THREE.Color(0xdfe9f3) },
-    },
-    vertexShader: `
-      varying vec3 vWorld;
-      void main() {
-        vec4 wp = modelMatrix * vec4(position, 1.0);
-        vWorld = wp.xyz;
-        gl_Position = projectionMatrix * viewMatrix * wp;
-      }`,
-    fragmentShader: `
-      uniform vec3 topColor; uniform vec3 midColor; uniform vec3 horizonColor;
-      varying vec3 vWorld;
-      void main() {
-        float h = normalize(vWorld).y;
-        float t = clamp(h, 0.0, 1.0);
-        vec3 c = mix(horizonColor, midColor, smoothstep(0.0, 0.25, t));
-        c = mix(c, topColor, smoothstep(0.25, 1.0, t));
-        gl_FragColor = vec4(c, 1.0);
-      }`,
-  });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.name = "sky";
-  return mesh;
-}
-
-// ---------------------------------------------------------------------------
-
 /**
  * Build a track from its data. Adds the group (and, until the theme system takes over, the sky,
  * lights and fog) to `scene`, adds the physics ground + wall colliders to `world`, and returns the
@@ -209,11 +124,12 @@ function makeSky() {
 export function buildTrack(id, world, scene) {
   const T = getTrack(id);
   const cfg = { ...TRACK_CONFIG, width: T.width, laps: T.laps, checkpoints: T.checkpointCount,
-                samples: T.samples, bounds: T.groundHalf, treeCount: T.treeCount ?? TRACK_CONFIG.treeCount };
+                samples: T.samples, bounds: T.groundHalf };
   const hw = cfg.width / 2;
+  const theme = getTheme(T.themeId);
+  const seed = hashString(T.id);
   const group = new THREE.Group();
   group.name = "track";
-  const envObjects = []; // scene-level objects this build added (removed + disposed in dispose())
   const physicsBodies = [];
 
   // --- Centreline curve -----------------------------------------------------
@@ -235,35 +151,23 @@ export function buildTrack(id, world, scene) {
     samples.push({ u, p, t, n, yaw: Math.atan2(-t.z, t.x) });
   }
 
-  // --- Sky + fog + lights ---------------------------------------------------
-  const skyMesh = makeSky();
-  scene.add(skyMesh);
-  scene.background = new THREE.Color(0xdfe9f3);
-  scene.fog = new THREE.Fog(0xdfe9f3, 180 * SCALE, 900 * SCALE);
-
-  const hemi = new THREE.HemisphereLight(0xbfd8ff, 0x3f6b2a, 0.55);
-  scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xfff2dc, 2.4);
-  sun.position.set(60, 110, 40);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.near = 10;
-  sun.shadow.camera.far = 320;
-  const S = 60;
-  sun.shadow.camera.left = -S; sun.shadow.camera.right = S;
-  sun.shadow.camera.top = S; sun.shadow.camera.bottom = -S;
-  sun.shadow.bias = -0.0006;
-  sun.shadow.normalBias = 0.02;
-  scene.add(sun);
-  scene.add(sun.target);
-  envObjects.push(skyMesh, hemi, sun, sun.target);
-
   // --- Ground ---------------------------------------------------------------
+  // Track bounding box -> ground rectangle. Track 1 keeps its original square (groundHalf); the other
+  // tracks use the bbox plus a per-track margin.
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const s of samples) { minX = Math.min(minX, s.p.x); maxX = Math.max(maxX, s.p.x); minZ = Math.min(minZ, s.p.z); maxZ = Math.max(maxZ, s.p.z); }
+  const groundRect = T.groundMargin != null
+    ? { cx: (minX + maxX) / 2, cz: (minZ + maxZ) / 2, w: (maxX - minX) + 2 * T.groundMargin, h: (maxZ - minZ) + 2 * T.groundMargin }
+    : { cx: 0, cz: 0, w: cfg.bounds * 2, h: cfg.bounds * 2 };
+  const GROUND_TILE_M = 1496 / 90; // texture tile size (Track 1: 90 repeats over 1496 m)
+  const groundTex = makeGroundTexture(theme, seed);
+  groundTex.repeat.set(Math.round(groundRect.w / GROUND_TILE_M * 1000) / 1000, Math.round(groundRect.h / GROUND_TILE_M * 1000) / 1000);
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(cfg.bounds * 2, cfg.bounds * 2),
-    new THREE.MeshStandardMaterial({ map: grassTexture(), roughness: 1, metalness: 0 })
+    new THREE.PlaneGeometry(groundRect.w, groundRect.h),
+    new THREE.MeshStandardMaterial({ map: groundTex, roughness: theme.ground.roughness, metalness: theme.ground.metalness })
   );
   ground.rotation.x = -Math.PI / 2;
+  ground.position.set(groundRect.cx, 0, groundRect.cz);
   ground.receiveShadow = true;
   group.add(ground);
 
@@ -302,10 +206,7 @@ export function buildTrack(id, world, scene) {
     geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
     geo.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
     geo.setIndex(idx);
-    const road = new THREE.Mesh(
-      geo,
-      new THREE.MeshStandardMaterial({ map: asphaltTexture(), roughness: 0.82, metalness: 0.05, side: THREE.DoubleSide })
-    );
+    const road = new THREE.Mesh(geo, makeRoadMaterial(theme, seed + 1));
     road.receiveShadow = true;
     road.name = "road";
     group.add(road);
@@ -315,8 +216,8 @@ export function buildTrack(id, world, scene) {
   {
     const geo = new THREE.BoxGeometry(cfg.curbSpacing * 0.98, 0.14, 0.9 * SCALE);
     const count = Math.floor(length / cfg.curbSpacing);
-    const red = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ color: 0xd8262a, roughness: 0.6 }), count);
-    const white = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.6 }), count);
+    const red = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ color: theme.kerb[0], roughness: 0.6 }), count);
+    const white = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ color: theme.kerb[1], roughness: 0.6 }), count);
     const m = new THREE.Matrix4();
     let ri = 0, wi = 0;
     for (let k = 0; k < count; k++) {
@@ -350,9 +251,9 @@ export function buildTrack(id, world, scene) {
     const VIS_T = 0.45;
     const OFF = hw + cfg.barrierOffset;
     const geo = new THREE.BoxGeometry(1, 1.0, VIS_T); // unit length, scaled per instance
-    const mesh = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ roughness: 0.7 }), N * 2);
+    const mesh = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ roughness: theme.barrier.roughness }), N * 2);
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), pos = new THREE.Vector3(), scl = new THREE.Vector3(), yAxis = new THREE.Vector3(0, 1, 0);
-    const cWhite = new THREE.Color(0xf0f0f0), cRed = new THREE.Color(0xd8262a), cBlue = new THREE.Color(0x2a5cd8);
+    const cWhite = new THREE.Color(theme.barrier.white), cRed = new THREE.Color(theme.barrier.a), cBlue = new THREE.Color(theme.barrier.b);
     let count = 0;
     // ALL wall segments are shapes of ONE static compound body. cannon keeps an O(n^2) collision
     // matrix (and a per-step broadphase sweep) over every body in the world: 840 separate wall
@@ -407,41 +308,6 @@ export function buildTrack(id, world, scene) {
     group.add(mesh);
   }
 
-  // --- Trees (instanced cone + trunk) ----------------------------------------
-  {
-    const positions = [];
-    let tries = 0;
-    while (positions.length < cfg.treeCount && tries++ < cfg.treeCount * 40) {
-      const x = (Math.random() * 2 - 1) * (cfg.bounds - 20);
-      const z = (Math.random() * 2 - 1) * (cfg.bounds - 20);
-      const d = distanceToCentreline(x, z);
-      if (d < hw + cfg.barrierOffset + 5 || d > 150) continue;
-      // keep the start straight clear for the grandstand
-      if (x > -70 && x < 70 && z > -30 && z < 30) continue;
-      positions.push([x, z]);
-    }
-    const trunkGeo = new THREE.CylinderGeometry(0.28, 0.4, 2.2, 7);
-    const crownGeo = new THREE.ConeGeometry(2.4, 6, 7);
-    const trunks = new THREE.InstancedMesh(trunkGeo, new THREE.MeshStandardMaterial({ color: 0x6b4a2b, roughness: 1 }), positions.length);
-    const crowns = new THREE.InstancedMesh(crownGeo, new THREE.MeshStandardMaterial({ roughness: 0.9 }), positions.length);
-    const m = new THREE.Matrix4();
-    const col = new THREE.Color();
-    positions.forEach(([x, z], k) => {
-      const sc = 0.8 + Math.random() * 0.8;
-      m.makeScale(sc, sc, sc);
-      m.setPosition(x, 1.1 * sc, z);
-      trunks.setMatrixAt(k, m);
-      m.makeScale(sc, sc, sc);
-      m.setPosition(x, (2.2 + 3) * sc, z);
-      crowns.setMatrixAt(k, m);
-      col.setHSL(0.3 + Math.random() * 0.08, 0.5 + Math.random() * 0.2, 0.22 + Math.random() * 0.12);
-      crowns.setColorAt(k, col);
-    });
-    trunks.castShadow = crowns.castShadow = true;
-    crowns.receiveShadow = true;
-    group.add(trunks, crowns);
-  }
-
   // --- Start / finish line + gates -------------------------------------------
   const checkpoints = [];
   for (let c = 0; c < cfg.checkpoints; c++) {
@@ -469,16 +335,6 @@ export function buildTrack(id, world, scene) {
   function sampleAt(u) {
     u = ((u % 1) + 1) % 1;
     return samples[Math.floor(u * N) % N];
-  }
-
-  function distanceToCentreline(x, z) {
-    let best = Infinity;
-    for (let i = 0; i < N; i += 2) {
-      const dx = samples[i].p.x - x, dz = samples[i].p.z - z;
-      const d = dx * dx + dz * dz;
-      if (d < best) best = d;
-    }
-    return Math.sqrt(best);
   }
 
   /** Nearest sample to a world position: { index, dist, sample }. */
@@ -516,8 +372,6 @@ export function buildTrack(id, world, scene) {
     return { id: `${pk.kind}-${i}`, kind: pk.kind, t: pk.t, position: s.p.clone() };
   });
 
-  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-  for (const s of samples) { minX = Math.min(minX, s.p.x); maxX = Math.max(maxX, s.p.x); minZ = Math.min(minZ, s.p.z); maxZ = Math.max(maxZ, s.p.z); }
   const bounds = { minX, maxX, minZ, maxZ, groundHalf: cfg.bounds };
 
   let disposed = false;
@@ -526,7 +380,6 @@ export function buildTrack(id, world, scene) {
     if (disposed) return;
     disposed = true;
     for (const b of physicsBodies) { try { world.removeBody(b); } catch (_) { /* already gone */ } }
-    for (const o of envObjects) scene.remove(o);
     scene.remove(group);
     const freed = new Set();
     const freeMaterial = (m) => {
@@ -542,14 +395,12 @@ export function buildTrack(id, world, scene) {
       if (o.shadow && o.shadow.map) o.shadow.map.dispose();
     };
     group.traverse(freeObject);
-    envObjects.forEach((o) => o.traverse && o.traverse(freeObject));
   }
 
-  scene.background = scene.background; // (kept: legacy environment above owns background/fog for now)
   return {
     id: T.id, name: T.name, place: T.place, weatherLabel: T.weatherLabel, themeId: T.themeId,
     difficulty: T.difficulty, laps: T.laps, width: cfg.width, barrierOffset: cfg.barrierOffset,
-    group, curve, length, samples, checkpoints, pickups, sun, halfWidth: hw, bounds,
+    group, curve, length, samples, checkpoints, pickups, halfWidth: hw, bounds, groundRect,
     nearest, startPose, sampleAt, tangentAt, gridSlot, dispose,
   };
 }
