@@ -5,17 +5,13 @@
 //     controller.update(carPosition, headingRad, remoteMarkers?) -> void
 //       call once per race frame. Redraws the track outline (computed once,
 //       from the track's own samples) plus the local player's marker, and any
-//       remoteMarkers passed - [{ position: {x,z}, heading, color }].
+//       remoteMarkers passed - [{ position: {x,z}, color }].
 //
-// LOCAL PLAYER ONLY for now, matching pickups.js's reasoning (see its file
-// header): remote markers would read from the same /rooms/{code}/players/
-// {uid}/state sync that hasn't been verified with two real browser windows
-// yet. `remoteMarkers` is already accepted and drawn here if passed - main.js
-// just isn't passing any yet - so wiring that in later (once the
-// multiplayer-sync prerequisite is verified) is a one-line addition at the
-// call site, not a change to this file. It would reuse the SAME
-// players/{uid}/state data the remote-car puppets already sync, per the task
-// spec - no second data path.
+// Remote players are now wired up (main.js collectRemoteDots): one dot per
+// active remote car, read from the SAME interpolated puppet transforms that
+// place the 3D cars - not from raw Firebase snapshots - so the dots move at
+// frame rate instead of stepping at the network rate. Solo passes nothing and
+// draws exactly as it always did: background, outline, local marker.
 //
 // Built AFTER the track-resize task (previous prompt), deliberately - the fit
 // math below is computed once from the actual (already-scaled) track.samples,
@@ -93,11 +89,37 @@ export function createMinimap(canvas, track) {
     ctx.restore();
   }
 
+  /** A remote player: a slightly smaller filled circle with a dark outline, so it
+   *  reads as "someone else" next to the local arrow. Fixed pixel radius - the
+   *  minimap transform is computed once and never zooms, so the dot is the same
+   *  size on every track. No heading: a circle has none to show. */
+  const DOT_R = 3.6;
+  function drawRemoteDot(x, z, color) {
+    const [mx, my] = toMap(x, z);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(mx, my, DOT_R, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "rgba(7,8,12,0.9)";
+    ctx.stroke();
+    ctx.restore();
+  }
+
   function update(carPosition, headingRad, remoteMarkers) {
     drawBackground();
     drawOutline();
+    // Remote dots first, local marker last, so the local player is never hidden
+    // underneath someone else's dot. A bad remote sample can't break the frame.
     if (remoteMarkers) {
-      for (const m of remoteMarkers) drawMarker(m.position.x, m.position.z, m.heading, m.color || "#8fb3ff", false);
+      try {
+        for (const m of remoteMarkers) {
+          const p = m && m.position;
+          if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.z)) continue;
+          drawRemoteDot(p.x, p.z, m.color || "#8fb3ff");
+        }
+      } catch (_) { /* minimap decoration only - never break the race */ }
     }
     drawMarker(carPosition.x, carPosition.z, headingRad, "#ff3b3b", true);
   }

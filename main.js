@@ -11,22 +11,22 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=53";
-import * as ui from "./ui.js?v=53";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=53";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=53";
-import { buildTrack, getTrack, listTracks, getTrackPreview, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=53";
-import { createCameraRig } from "./camera.js?v=53";
-import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=53";
-import { commentate } from "./ai-commentary.js?v=53";
-import * as mp from "./multiplayer.js?v=53";
-import { createPickups } from "./pickups.js?v=53";
-import { createMinimap } from "./minimap.js?v=53";
-import { createEnvironment, getTheme } from "./themes.js?v=53";
-import { buildScenery } from "./scenery.js?v=53";
-import { createSpeedometer } from "./speedometer.js?v=53";
-import * as prog from "./progression.js?v=53";
-import * as audio from "./audio.js?v=53";
+import * as auth from "./auth.js?v=54";
+import * as ui from "./ui.js?v=54";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=54";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=54";
+import { buildTrack, getTrack, listTracks, getTrackPreview, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=54";
+import { createCameraRig } from "./camera.js?v=54";
+import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=54";
+import { commentate } from "./ai-commentary.js?v=54";
+import * as mp from "./multiplayer.js?v=54";
+import { createPickups } from "./pickups.js?v=54";
+import { createMinimap } from "./minimap.js?v=54";
+import { createEnvironment, getTheme } from "./themes.js?v=54";
+import { buildScenery } from "./scenery.js?v=54";
+import { createSpeedometer } from "./speedometer.js?v=54";
+import * as prog from "./progression.js?v=54";
+import * as audio from "./audio.js?v=54";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera
@@ -286,6 +286,15 @@ const REAL_MODEL_WAIT_MS = 3000; // how long a race start waits for a real car m
 const knownNames = new Map(); // uid -> name, survives a player's own node being removed
 const REMOTE_LERP_MS = 120;
 
+// Minimap dots for remote players. Colour comes from the grid slot (mp.slotFor,
+// the same host-written order every client sees), so a given player is the same
+// colour on every screen and four players are four distinct colours. Red is the
+// local player's and is never in this list.
+const REMOTE_DOT_COLORS = ["#4da3ff", "#3ddc84", "#ffb300", "#c77dff"];
+const REMOTE_DOT_STALE_MS = 3000; // hide a dot whose player hasn't sent state for this long
+const _remoteDotPool = []; // marker objects, allocated at most once per player and reused
+const _remoteDots = [];    // the list handed to minimap.update() - holds pool objects, never new ones
+
 function makeNameSprite(text) {
   const c = document.createElement("canvas");
   c.width = 256; c.height = 64;
@@ -405,6 +414,8 @@ function updateRemotesFromView(view) {
     let initial = null;
     try { if (track && view.status === "racing") initial = gridPoseFor(track, view, p.uid); } catch (_) { /* fall back to network state only */ }
     const r = ensureRemotePuppet(p.uid, p.name, p.carId, initial);
+    // Read-only: slotFor is pure, and the slot only picks this player's minimap dot colour.
+    try { r.slot = mp.slotFor(view, p.uid); } catch (_) { /* dot colour falls back below */ }
     if (p.state) applyRemoteState(r, p.state);
   }
   for (const uid of [...remotes.keys()]) if (!seen.has(uid)) removeRemotePuppet(uid);
@@ -427,6 +438,40 @@ function tickRemotes() {
       if (me) audio.remoteEngine(uid, Math.hypot(r.root.position.x - me.x, r.root.position.z - me.z), r.speedKmh || 0);
     } catch (_) { /* audio only */ }
   }
+}
+
+/** One minimap dot per ACTIVE remote player, filled into a reused array (never a
+ *  fresh one) and returned - null when there is nothing to draw, so solo takes
+ *  exactly the same path through minimap.update() as it always has.
+ *
+ *  Positions come from r.root.position - the interpolated puppet transform
+ *  tickRemotes() just wrote, i.e. the very transform the 3D car is drawn at - so
+ *  a dot glides with the car instead of stepping at the ~80ms network rate.
+ *
+ *  Skipped: a player whose puppet hasn't spawned yet (no root / no state), one
+ *  whose last sample is older than REMOTE_DOT_STALE_MS, and any NaN position.
+ *  A player who leaves loses their puppet in removeRemotePuppet(), so their dot
+ *  simply stops being collected. */
+function collectRemoteDots(now) {
+  let n = 0;
+  for (const [, r] of remotes) {
+    if (!r.root || !r.hasState || !r.root.visible) continue;
+    if (now - r.tStart > REMOTE_DOT_STALE_MS) continue;
+    const p = r.root.position;
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.z)) continue;
+    const slot = typeof r.slot === "number" && r.slot >= 0 ? r.slot : n;
+    let d = _remoteDotPool[n];
+    if (!d) d = _remoteDotPool[n] = { position: { x: 0, z: 0 }, color: "" };
+    d.position.x = p.x;
+    d.position.z = p.z;
+    d.color = REMOTE_DOT_COLORS[slot % REMOTE_DOT_COLORS.length];
+    _remoteDots[n] = d;
+    n++;
+  }
+  // The pool keeps its objects; only this list's length changes, so a dot
+  // appearing or going stale never allocates a new marker object.
+  _remoteDots.length = n;
+  return n ? _remoteDots : null;
 }
 
 /** (currentLap desc, trackDistance desc) - lap alone ties everyone mid-lap. */
@@ -1388,10 +1433,14 @@ function updateRace(dt) {
     if (r.phase === "racing" && r.health < 25 && now - r.lowHpAt > 1200) { r.lowHpAt = now; audio.lowHpBeep(); }
   } catch (_) { /* audio only */ }
 
-  // Minimap (Task 3): local player only for now - see minimap.js. Heading uses
-  // the same atan2(-fwd.z, fwd.x) convention track.js's own samples use.
+  // Minimap (Task 3): local marker plus one dot per active remote player.
+  // Heading uses the same atan2(-fwd.z, fwd.x) convention track.js's own samples
+  // use. collectRemoteDots returns null in solo, so solo draws exactly as before;
+  // a failure there must never cost us the local marker.
   _fwd.set(1, 0, 0).applyQuaternion(r.rig.root.quaternion);
-  r.minimap.update(body.position, Math.atan2(-_fwd.z, _fwd.x));
+  let remoteDots = null;
+  try { remoteDots = collectRemoteDots(now); } catch (_) { /* dots are decoration only */ }
+  r.minimap.update(body.position, Math.atan2(-_fwd.z, _fwd.x), remoteDots);
 
   // Drift commentary
   if (r.phase === "racing" && input.handbrake && kmh > 45 && now - r.lastDriftLineAt > 9000) {
