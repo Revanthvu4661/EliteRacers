@@ -11,22 +11,22 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=54";
-import * as ui from "./ui.js?v=54";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=54";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=54";
-import { buildTrack, getTrack, listTracks, getTrackPreview, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=54";
-import { createCameraRig } from "./camera.js?v=54";
-import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=54";
-import { commentate } from "./ai-commentary.js?v=54";
-import * as mp from "./multiplayer.js?v=54";
-import { createPickups } from "./pickups.js?v=54";
-import { createMinimap } from "./minimap.js?v=54";
-import { createEnvironment, getTheme } from "./themes.js?v=54";
-import { buildScenery } from "./scenery.js?v=54";
-import { createSpeedometer } from "./speedometer.js?v=54";
-import * as prog from "./progression.js?v=54";
-import * as audio from "./audio.js?v=54";
+import * as auth from "./auth.js?v=55";
+import * as ui from "./ui.js?v=55";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=55";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=55";
+import { buildTrack, getTrack, listTracks, getTrackPreview, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=55";
+import { createCameraRig } from "./camera.js?v=55";
+import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=55";
+import { commentate } from "./ai-commentary.js?v=55";
+import * as mp from "./multiplayer.js?v=55";
+import { createPickups } from "./pickups.js?v=55";
+import { createMinimap } from "./minimap.js?v=55";
+import { createEnvironment, getTheme } from "./themes.js?v=55";
+import { buildScenery } from "./scenery.js?v=55";
+import { createSpeedometer } from "./speedometer.js?v=55";
+import * as prog from "./progression.js?v=55";
+import * as audio from "./audio.js?v=55";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera

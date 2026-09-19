@@ -16,7 +16,8 @@
 
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { getTheme, makeRng, hashString } from "./themes.js?v=54";
+import { getTheme, makeRng, hashString } from "./themes.js?v=55";
+import { createTreeAssets, THEME_TREES, TREE_QUALITY, pickQuality } from "./trees.js?v=55";
 
 const SLOW_FRAME_S = 0.022;
 const SLOW_FOR_S = 2;
@@ -90,8 +91,9 @@ function instanced(geo, mat, count, group, shadow = true) {
 // ---------------------------------------------------------------------------
 // Scenery sets
 // ---------------------------------------------------------------------------
-function buildTrees(group, track, rnd, P) {
-  // Same trees as the original Green Valley (cone crown + trunk), seeded instead of Math.random.
+// Original Green Valley trees (cone crown + trunk), seeded instead of Math.random. Kept reachable
+// through ?trees=old (see buildScenery) until the new trees are approved; not otherwise called.
+function buildTreesOld(group, track, rnd, P) {
   const target = 260;
   const positions = [];
   let tries = 0;
@@ -115,6 +117,85 @@ function buildTrees(group, track, rnd, P) {
     crowns.setColorAt(k, col);
   });
   trunks.count = crowns.count = positions.length;
+}
+
+// ---------------------------------------------------------------------------
+// New procedural trees (trees.js). T1 scope: wire the generator in behind ?trees=old using the
+// SAME placement loop buildTreesOld used above, rendering LOD0 only (no per-chunk LOD switching,
+// no exclusion zones beyond the ones already here) - T2 replaces this placement/instancing block
+// wholesale with seeded clumps, exclusion zones and chunked LOD. Kept deliberately thin so T2 has
+// a clean function to rewrite rather than a real placement system to unpick.
+// ---------------------------------------------------------------------------
+function buildTreesNew(group, track, rnd, P, theme) {
+  const target = 260;
+  const positions = [];
+  let tries = 0;
+  while (positions.length < target && tries++ < target * 40) {
+    const [x, z] = P.randomPoint(20);
+    const d = P.centreDist(x, z);
+    if (d < P.wall + 5 || d > 150) continue;
+    if (P.nearStart(x, z, 80)) continue;
+    positions.push([x, z]);
+  }
+
+  const qualityId = pickQuality();
+  const assets = createTreeAssets(theme.id, qualityId, hashString(track.id) + 3, null);
+  const mix = THEME_TREES[theme.id] || [];
+  if (!mix.length || !assets.variants.length) return { assets };
+
+  // Deterministic weighted species pick (mix weights sum to ~1; a stray remainder falls to the
+  // last species rather than picking none).
+  function pickSpecies(u) {
+    let acc = 0;
+    for (const [sid, w] of mix) { acc += w; if (u < acc) return sid; }
+    return mix[mix.length - 1][0];
+  }
+
+  // Bucket instance transforms per (species, variant) so each becomes exactly one InstancedMesh.
+  const buckets = new Map(); // key "species:vi" -> { variant, mats: Float32Array-backed list }
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), pos = new THREE.Vector3(), scl = new THREE.Vector3();
+  const tiltAxis = new THREE.Vector3(), yUp = new THREE.Vector3(0, 1, 0), yawQ = new THREE.Quaternion();
+  const col = new THREE.Color();
+  positions.forEach(([x, z]) => {
+    const sid = pickSpecies(rnd());
+    const variants = assets.variants.filter((v) => v.species === sid);
+    if (!variants.length) return;
+    const variant = variants[(rnd() * variants.length) | 0];
+    const key = sid + ":" + variant.index;
+    let b = buckets.get(key);
+    if (!b) { b = { variant, list: [] }; buckets.set(key, b); }
+
+    const scale = 0.8 + rnd() * 0.6; // briefed 0.8-1.4 of the species' natural height
+    const yaw = rnd() * Math.PI * 2;
+    const tiltAngle = rnd() * (3 * Math.PI / 180); // <= 3 degrees
+    const tiltDir = rnd() * Math.PI * 2;
+    tiltAxis.set(Math.cos(tiltDir), 0, Math.sin(tiltDir));
+    q.setFromAxisAngle(tiltAxis, tiltAngle);
+    yawQ.setFromAxisAngle(yUp, yaw);
+    q.multiply(yawQ);
+    pos.set(x, 0, z);
+    scl.set(scale, scale, scale);
+    m.compose(pos, q, scl);
+    col.setHSL(0.32 + (rnd() - 0.5) * 0.05, 0.45 + rnd() * 0.15, 0.42 + (rnd() - 0.5) * 0.12);
+    b.list.push({ matrix: m.clone(), color: col.clone() });
+  });
+
+  for (const { variant, list } of buckets.values()) {
+    const geo = variant.lods[0].geometry; // T1: LOD0 only; T2 adds per-chunk distance LOD
+    const mesh = new THREE.InstancedMesh(geo, variant.materials, Math.max(1, list.length));
+    // No shadows from trees (see file header): the sun's shadow camera only spans ~60 m around
+    // the car, and the old cone trees spent ~2.5 ms/frame in that pass for shadows almost never
+    // on screen (confirmed in the baseline decomposition: shadow pass ~= tree draw cost).
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    mesh.frustumCulled = false; // instances spread over the whole map, same as every other set here
+    list.forEach((inst, i) => { mesh.setMatrixAt(i, inst.matrix); mesh.setColorAt(i, inst.color); });
+    mesh.count = list.length;
+    mesh.name = "tree-" + variant.species + "-v" + variant.index;
+    group.add(mesh);
+  }
+
+  return { assets };
 }
 
 function buildMesa(group, track, rnd, P) {
@@ -420,13 +501,25 @@ function createWeather(theme, group) {
 
 // ---------------------------------------------------------------------------
 
+// ?trees=old keeps the original cone trees reachable for comparison; default (no param, or any
+// other value) is the new procedural trees. Read once per build, not cached, so a track change
+// picks up a URL edit without a full page reload.
+function treesWanted() {
+  try { return new URLSearchParams(location.search).get("trees") !== "old"; }
+  catch (_) { return true; }
+}
+
 export function buildScenery(themeId, track, scene) {
   const theme = getTheme(themeId);
   const group = new THREE.Group();
   group.name = "scenery-" + theme.id;
   const rnd = makeRng(hashString(track.id) + 1);
   const P = makePlacement(track, rnd);
-  if (theme.sceneryId === "trees") buildTrees(group, track, rnd, P);
+  let treeAssets = null;
+  if (theme.sceneryId === "trees") {
+    if (treesWanted()) treeAssets = buildTreesNew(group, track, rnd, P, theme).assets;
+    else buildTreesOld(group, track, rnd, P);
+  }
   else if (theme.sceneryId === "mesa") buildMesa(group, track, rnd, P);
   else if (theme.sceneryId === "port") buildPort(group, track, rnd, P);
   const weather = createWeather(theme, group);
@@ -441,6 +534,12 @@ export function buildScenery(themeId, track, scene) {
       disposed = true;
       scene.remove(group);
       disposeTree(group);
+      // Frees every LOD's geometry/material/texture, including L1/L2 which (T1) are baked but
+      // never added to the scene graph, so disposeTree's traversal above never sees them - only
+      // this explicit call does. Safe to run after disposeTree: three.js dispose() is a no-op on
+      // an already-freed resource, so the L0 set (freed by both paths) is not double-freed in any
+      // harmful way, just redundantly.
+      if (treeAssets) treeAssets.dispose();
     },
   };
 }
