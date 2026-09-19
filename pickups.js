@@ -29,7 +29,7 @@
 // ============================================================================
 
 import * as THREE from "three";
-import { PICKUP_SPAWN_U, REPAIR_SPAWN_U } from "./track.js?v=40";
+import { PICKUP_SPAWN_U, REPAIR_SPAWN_U } from "./track.js?v=44";
 
 const HOVER_HEIGHT = 1.3;       // m above the road
 const TRIGGER_RADIUS = 3.2;     // m, proximity trigger (generous - arcade feel)
@@ -148,6 +148,12 @@ export function createPickups(scene, track) {
     return { collected, boosted: now < boostUntil };
   }
 
+  /** Make every pickup available again (pooled across races - see main.js ensurePickups). */
+  function reset() {
+    for (const p of pickups) { p.available = true; p.respawnAt = 0; setShown(p, true); }
+    boostUntil = 0;
+  }
+
   function dispose() {
     for (const p of pickups) {
       scene.remove(p.mesh);
@@ -157,5 +163,5 @@ export function createPickups(scene, track) {
     }
   }
 
-  return { update, dispose, BOOST_FORCE_N, REPAIR_AMOUNT };
+  return { update, reset, dispose, BOOST_FORCE_N, REPAIR_AMOUNT };
 }

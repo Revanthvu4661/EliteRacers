@@ -11,20 +11,20 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=40";
-import * as ui from "./ui.js?v=40";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=40";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=40";
-import { buildTrack, TRACK_CONFIG, gridOffsets } from "./track.js?v=40";
-import { createCameraRig } from "./camera.js?v=40";
-import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=40";
-import { commentate } from "./ai-commentary.js?v=40";
-import * as mp from "./multiplayer.js?v=40";
-import { createPickups } from "./pickups.js?v=40";
-import { createMinimap } from "./minimap.js?v=40";
-import { createSpeedometer } from "./speedometer.js?v=40";
-import * as prog from "./progression.js?v=40";
-import * as audio from "./audio.js?v=40";
+import * as auth from "./auth.js?v=44";
+import * as ui from "./ui.js?v=44";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=44";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=44";
+import { buildTrack, TRACK_CONFIG, gridOffsets } from "./track.js?v=44";
+import { createCameraRig } from "./camera.js?v=44";
+import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=44";
+import { commentate } from "./ai-commentary.js?v=44";
+import * as mp from "./multiplayer.js?v=44";
+import { createPickups } from "./pickups.js?v=44";
+import { createMinimap } from "./minimap.js?v=44";
+import { createSpeedometer } from "./speedometer.js?v=44";
+import * as prog from "./progression.js?v=44";
+import * as audio from "./audio.js?v=44";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera
@@ -196,6 +196,33 @@ function ensureTrack() {
   return track;
 }
 const cameraRig = createCameraRig(camera);
+
+// Pickups are created ONCE with the track and pooled across races (reset() per race). They own point
+// lights, and three.js recompiles every lit material whenever the scene's light count changes, so
+// creating/disposing them per race put a multi-hundred-ms shader compile inside every countdown.
+let pickupsCtl = null;
+function ensurePickups(t) {
+  if (!pickupsCtl) pickupsCtl = createPickups(raceScene, t);
+  return pickupsCtl;
+}
+
+// Race-start prewarm (Bug B): while the player is on car-select / the lobby, build the circuit and
+// compile the race scene's shaders (non-blocking where the GPU supports parallel compile) so the
+// click on Race doesn't pay for it.
+let prewarmScheduled = false;
+function schedulePrewarm() {
+  if (prewarmScheduled) return;
+  prewarmScheduled = true;
+  setTimeout(async () => {
+    try {
+      if (state.screen === "race") return;
+      const t = ensureTrack();
+      ensurePickups(t);
+      if (renderer.compileAsync) await renderer.compileAsync(raceScene, camera);
+      else renderer.compile(raceScene, camera);
+    } catch (err) { console.warn("[prewarm]", err); }
+  }, 700);
+}
 
 /** Visual rig: model frame (faces -Z) -> chassis frame (+X forward). */
 function buildCarRig(model) {
@@ -721,19 +748,52 @@ const _rel = new THREE.Vector3();
 const _fwd = new THREE.Vector3();
 const _side = new THREE.Vector3();
 
+// Race-start timing (Bug B): performance marks from the click to GO, plus a log of any frame over
+// 50 ms while the race is starting. ER.perfSummary() prints them relative to the click.
+// "Stable" = the last STABLE_FRAMES frames contain no spike: every frame is under 25 ms, or (on a slower
+// display, where steady frames are simply longer) within 1.5x of those frames' own median. A hitch
+// (shader compile, texture upload) is many times the median, so it always breaks stability; a merely
+// slow-but-steady machine still passes instead of always waiting out the 5 s cap.
+const STABLE_FRAMES = 10;
+function noteFrame(rr, ms) {
+  const ring = rr.frameRing || (rr.frameRing = []);
+  ring.push(ms);
+  if (ring.length > STABLE_FRAMES) ring.shift();
+  if (ring.length < STABLE_FRAMES) return false;
+  const sorted = ring.slice().sort((a, b) => a - b);
+  return sorted[STABLE_FRAMES - 1] <= Math.max(25, sorted[STABLE_FRAMES >> 1] * 1.5);
+}
+const pmark = (n) => { try { performance.mark("er:" + n); } catch (_) { /* timing only */ } };
+function perfSummary() {
+  const c = performance.getEntriesByName("er:click").pop();
+  if (!c) return null;
+  const out = {};
+  for (const e of performance.getEntriesByType("mark")) if (e.name.startsWith("er:") && e.startTime >= c.startTime) out[e.name.slice(3)] = Math.round(e.startTime - c.startTime);
+  const r = state.race;
+  return { marksMsFromClick: out, slowFramesOver50ms: r && r.slowFrames ? r.slowFrames.slice() : [], worstFrameMs: r ? r.worstFrame || 0 : 0 };
+}
+
+// Longest the race start waits for the scene to settle before starting the countdown anyway.
+const WARMUP_MAX_MS = 5000;
+
 async function startRace() {
   teardownRace();
-  ui.setLoading("Building circuit...");
+  ui.setLoading("Loading race...");
   ui.setHudLap(1, TRACK_CONFIG.laps);
   ui.setHudTime(0);
   ui.setHudSpeed(0);
   ui.setHudBest(null);
   ui.setHudCenter("");
   ui.setHudCamera(cameraRig.getMode());
+  // Let the "Loading race" overlay actually paint before any heavy synchronous work below.
+  await new Promise((res) => { requestAnimationFrame(() => setTimeout(res, 0)); setTimeout(res, 120); });
+  if (state.screen !== "race") return;
 
   const t = ensureTrack();
+  const pickups = ensurePickups(t);
+  pickups.reset();
+  pmark("track-ready");
   const carCfg = skinnedCar(getCar(state.carId));
-  ui.setLoading("Loading car...");
   // Never let a slow model download hold the start: fallback after REAL_MODEL_WAIT_MS,
   // and swap the real body in (wheels are baked into it, so hide the Ferrari's) later.
   const model = await loadCarModelQuick(carCfg, REAL_MODEL_WAIT_MS, (late) => {
@@ -746,12 +806,27 @@ async function startRace() {
     } catch (_) { /* visual only */ }
   });
   if (state.screen !== "race") return; // user left while loading
+  pmark("car-loaded");
 
   const rig = buildCarRig(model);
   const veh = createVehicle(world, carCfg, rig.layout, onCollide);
   rig.bodyPivot.position.y = -veh.restHeight;
   raceScene.add(rig.root);
   world.addEventListener("postStep", syncWheelVisuals);
+
+  // Do the first-use GPU work NOW, under the loading overlay, instead of inside the countdown:
+  // compile this car's materials against the race scene's lights and upload every texture.
+  try {
+    renderer.compile(raceScene, camera);
+    const seen = new Set();
+    raceScene.traverse((o) => {
+      if (!o.isMesh || !o.material) return;
+      for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+        for (const tex of [m.map, m.emissiveMap, m.normalMap]) if (tex && !seen.has(tex)) { seen.add(tex); renderer.initTexture(tex); }
+      }
+    });
+  } catch (err) { console.warn("[warmup] compile/initTexture failed", err); }
+  pmark("gpu-warm");
 
   const online = !!mp.getRoom();
   let pose = t.startPose(7); // solo: unchanged
@@ -765,10 +840,8 @@ async function startRace() {
   }
   veh.reset(pose.position, pose.yaw);
 
-  // Recreated per race (like the car rig above) so pickup availability always
-  // starts fresh; disposed in teardownRace(). Solo-only for now - see
+  // Pickups are pooled (ensurePickups above, reset() per race). Solo-only for now - see
   // pickups.js's file header for why multiplayer sync isn't wired yet.
-  const pickups = createPickups(raceScene, t);
   const minimap = createMinimap(document.getElementById("minimap"), t);
   // Analog speed gauge (speedometer.js) - visual only, guarded so it can never break a race.
   let speedo = null;
@@ -777,8 +850,9 @@ async function startRace() {
   state.race = {
     ready: true,
     online,
-    phase: "countdown",
-    countdownEnd: countdownEndTime(),
+    phase: "warmup",            // -> "countdown" once frames are stable (or after WARMUP_MAX_MS) -> "racing"
+    countdownEnd: null,         // set by beginCountdown()
+    syncedEnd: online ? countdownEndTime() : null, // online: the shared server-synced start, unchanged
     startedAt: 0,
     lapStartedAt: 0,
     lapTimes: [],
@@ -792,6 +866,7 @@ async function startRace() {
     pendingRespawn: false,
     wrongWayFor: 0,
     lastCountN: 0, lastWW: null, lowHpAt: 0,
+    readyAt: performance.now(),
   };
   try { audio.engineStart(); } catch (_) { /* audio only */ }
   ui.setHudHealth(HEALTH_MAX);
@@ -801,6 +876,14 @@ async function startRace() {
   cameraRig.reset();
   cameraRig.setMode("chase");
   cameraRig.snap(cameraTarget());
+  pmark("scene-ready");
+}
+
+/** End of warmup: the countdown clock starts NOW (solo), or is the shared synced start (online). */
+function beginCountdown(r, now) {
+  r.phase = "countdown";
+  r.countdownEnd = r.online ? r.syncedEnd : now + COUNTDOWN_S * 1000;
+  pmark("countdown-start");
   ui.setLoading(null);
 }
 
@@ -821,7 +904,6 @@ function teardownRace() {
   world.removeEventListener("postStep", syncWheelVisuals);
   if (r.veh) r.veh.dispose();
   if (r.rig) raceScene.remove(r.rig.root);
-  if (r.pickups) r.pickups.dispose();
   try { if (r.speedo) r.speedo.destroy(); } catch (_) { /* visual only */ }
   hudBanner.reconnecting = false; hudBanner.respawnUntil = 0; hudBanner.wrongWay = null;
   refreshBanner();
@@ -1018,6 +1100,13 @@ function updateRace(dt) {
   const t = r.track;
   const now = performance.now();
 
+  // Warmup: car frozen, overlay up, first frames rendering. Start the countdown once 10 consecutive
+  // frames are spike-free (r.stableMarked, set in frame()), after WARMUP_MAX_MS at the latest, or -
+  // online - once the shared start time has arrived.
+  if (r.phase === "warmup") {
+    if (r.stableMarked || now - r.readyAt > WARMUP_MAX_MS || (r.online && r.syncedEnd != null && now >= r.syncedEnd)) beginCountdown(r, now);
+  }
+
   // Countdown
   if (r.phase === "countdown") {
     const remaining = (r.countdownEnd - now) / 1000;
@@ -1028,6 +1117,7 @@ function updateRace(dt) {
       if (remaining <= 0) audio.goBeep();
     } catch (_) { /* audio only */ }
     if (remaining <= 0) {
+      pmark("go");
       r.phase = "racing";
       r.startedAt = now;
       r.lapStartedAt = now;
@@ -1233,9 +1323,10 @@ function goTo(screen) {
   if (mp.getRoom() && !wantsRoom) mp.leaveRoom();
   state.screen = ui.showScreen(screen);
   keys.clear();
+  if (screen === "select" || screen === "lobby") schedulePrewarm();
   if (screen === "select") { renderCarCards(); refreshCoins(); setShowcaseCar(skinnedCar(getCar(state.carId))); }
   if (screen === "garage") renderGarage();
-  if (screen === "race") startRace();
+  if (screen === "race") { pmark("click"); startRace(); }
 }
 
 // ---------------------------------------------------------------------------
@@ -1243,9 +1334,17 @@ function goTo(screen) {
 // ---------------------------------------------------------------------------
 const clock = new THREE.Clock();
 function frame() {
-  const dt = Math.min(clock.getDelta(), 0.05);
+  const rawDt = clock.getDelta();
+  const dt = Math.min(rawDt, 0.05);
 
   if (state.screen === "race" && state.race?.ready) {
+    try { // start-up timing only
+      const rr = state.race;
+      if (!rr.firstFrameMarked) { rr.firstFrameMarked = true; pmark("first-frame"); }
+      if (rawDt > 0.05 && (rr.phase === "countdown" || rr.phase === "warmup" || performance.now() - rr.readyAt < 5000)) (rr.slowFrames || (rr.slowFrames = [])).push({ ms: Math.round(rawDt * 1000), phase: rr.phase, sinceReadyMs: Math.round(performance.now() - rr.readyAt) });
+      rr.worstFrame = Math.max(rr.worstFrame || 0, Math.round(rawDt * 1000));
+      if (noteFrame(rr, rawDt * 1000) && !rr.stableMarked) { rr.stableMarked = true; pmark("stable10"); }
+    } catch (_) { /* timing only */ }
     updateRace(dt);
     renderer.render(raceScene, camera);
   } else {
@@ -1267,7 +1366,7 @@ function frame() {
 // Boot
 // ---------------------------------------------------------------------------
 // Dev handle for the console / automated checks (harmless in the demo).
-window.ER = { state, cameraRig, TUNING, keys, camera, THREE, mp, remotes, computeLeaderboard, computeResultsBoard, updateRace, hudBanner, showcase, prog, renderer, raceScene, dumpHero, gridPoseFor, gridOffsets, audio, updateRemotesFromView };
+window.ER = { state, cameraRig, TUNING, keys, camera, THREE, mp, remotes, computeLeaderboard, computeResultsBoard, updateRace, hudBanner, showcase, prog, renderer, raceScene, dumpHero, gridPoseFor, gridOffsets, audio, updateRemotesFromView, perfSummary };
 
 // WebGL context loss (GPU reset, driver hiccup, tab throttling): keep the page alive and
 // rebuild what lives in GPU memory that three.js can't restore on its own - the PMREM
