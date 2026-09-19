@@ -343,6 +343,7 @@ export function renderGarage(carName, rows, onBuy, onEquip) {
     btn.className = "btn " + (r.equipped ? "btn-ghost" : "btn-primary");
     btn.textContent = r.equipped ? "Equipped" : (r.owned ? "Equip" : "Buy");
     btn.disabled = r.equipped;
+    btn.dataset.sfx = "none"; // audio.js: buy/equip play their own chime/buzz, skip the generic click
     btn.addEventListener("click", () => (r.owned ? onEquip(r.id) : onBuy(r.id)));
     li.append(sw, name, price, btn);
     list.appendChild(li);

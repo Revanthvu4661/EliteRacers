@@ -253,6 +253,8 @@ kbd {
 .hud-center.pop { animation: pop 500ms cubic-bezier(.2,.9,.3,1.2); }
 @keyframes pop { from { transform: translate(-50%, -50%) scale(1.8); opacity: 0; } to { transform: translate(-50%, -50%) scale(1); opacity: 1; } }
 .hud-quit { position: absolute; top: 20px; right: 24px; background: rgba(0,0,0,0.45); }
+.hud-mute { position: absolute; top: 20px; right: 96px; background: rgba(0,0,0,0.45); min-width: 40px; }
+.btn-mute { min-width: 40px; padding: 8px 10px; font-size: 15px; line-height: 1; }
 /* Status banner - sits under the countdown/GO text, above the commentary. */
 .hud-banner {
   top: 62%; left: 50%; transform: translateX(-50%);

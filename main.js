@@ -11,19 +11,20 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=32";
-import * as ui from "./ui.js?v=32";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=32";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=32";
-import { buildTrack, TRACK_CONFIG, gridOffsets } from "./track.js?v=32";
-import { createCameraRig } from "./camera.js?v=32";
-import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=32";
-import { commentate } from "./ai-commentary.js?v=32";
-import * as mp from "./multiplayer.js?v=32";
-import { createPickups } from "./pickups.js?v=32";
-import { createMinimap } from "./minimap.js?v=32";
-import { createSpeedometer } from "./speedometer.js?v=32";
-import * as prog from "./progression.js?v=32";
+import * as auth from "./auth.js?v=35";
+import * as ui from "./ui.js?v=35";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=35";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=35";
+import { buildTrack, TRACK_CONFIG, gridOffsets } from "./track.js?v=35";
+import { createCameraRig } from "./camera.js?v=35";
+import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=35";
+import { commentate } from "./ai-commentary.js?v=35";
+import * as mp from "./multiplayer.js?v=35";
+import { createPickups } from "./pickups.js?v=35";
+import { createMinimap } from "./minimap.js?v=35";
+import { createSpeedometer } from "./speedometer.js?v=35";
+import * as prog from "./progression.js?v=35";
+import * as audio from "./audio.js?v=35";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera
@@ -323,6 +324,7 @@ function applyRemoteState(r, netState) {
   }
   r.to.p.set(netState.position.x, netState.position.y, netState.position.z);
   r.to.q.set(netState.quaternion.x, netState.quaternion.y, netState.quaternion.z, netState.quaternion.w);
+  r.speedKmh = Number(netState.speedKmh) || 0;
   r.tStart = performance.now();
   r.hasState = true;
   if (r.root) r.root.visible = true;
@@ -332,6 +334,7 @@ function removeRemotePuppet(uid) {
   const r = remotes.get(uid);
   if (!r) return;
   remotes.delete(uid);
+  try { audio.removeRemoteEngine(uid); } catch (_) { /* audio only */ }
   if (r.root) { raceScene.remove(r.root); disposePuppet(r.root); }
 }
 
@@ -369,11 +372,15 @@ function clearRemotes() {
 /** Advance every remote puppet's interpolation. Called once per rendered race frame. */
 function tickRemotes() {
   const now = performance.now();
-  for (const r of remotes.values()) {
+  for (const [uid, r] of remotes) {
     if (!r.root || !r.hasState) continue;
     const alpha = Math.min(1, (now - r.tStart) / REMOTE_LERP_MS);
     r.root.position.lerpVectors(r.from.p, r.to.p, alpha);
     r.root.quaternion.slerpQuaternions(r.from.q, r.to.q, alpha);
+    try {
+      const me = state.race && state.race.veh.chassisBody.position;
+      if (me) audio.remoteEngine(uid, Math.hypot(r.root.position.x - me.x, r.root.position.z - me.z), r.speedKmh || 0);
+    } catch (_) { /* audio only */ }
   }
 }
 
@@ -548,7 +555,7 @@ function renderGarage() {
       owned: prog.isOwned(p, car.id, s.id), equipped: s.id === equipped,
     }));
     ui.renderGarage(car.name, rows,
-      (id) => { const r = prog.buySkin(progressUid(), car.id, id); garageStatus(r.ok ? "Purchased!" : r.reason, r.ok ? "ok" : "err"); if (r.ok) ui.toast("Skin purchased", "ok", 1400); renderGarage(); },
+      (id) => { const r = prog.buySkin(progressUid(), car.id, id); try { r.ok ? audio.buy() : audio.denied(); } catch (_) { /* audio only */ } garageStatus(r.ok ? "Purchased!" : r.reason, r.ok ? "ok" : "err"); if (r.ok) ui.toast("Skin purchased", "ok", 1400); renderGarage(); },
       (id) => { const r = prog.equipSkin(progressUid(), car.id, id); garageStatus(r.ok ? "Equipped" : r.reason, r.ok ? "ok" : "err"); renderGarage(); setShowcaseCar(skinnedCar(car)); });
   } catch (err) {
     console.warn("[garage]", err);
@@ -712,6 +719,7 @@ const COUNTDOWN_S = 3.4;
 const _v = new THREE.Vector3();
 const _rel = new THREE.Vector3();
 const _fwd = new THREE.Vector3();
+const _side = new THREE.Vector3();
 
 async function startRace() {
   teardownRace();
@@ -783,7 +791,9 @@ async function startRace() {
     health: HEALTH_MAX,
     pendingRespawn: false,
     wrongWayFor: 0,
+    lastCountN: 0, lastWW: null, lowHpAt: 0,
   };
+  try { audio.engineStart(); } catch (_) { /* audio only */ }
   ui.setHudHealth(HEALTH_MAX);
   if (online) { ui.renderLeaderboard(computeLeaderboard(mp.getRoom())); }
   syncChassisVisual();
@@ -815,6 +825,7 @@ function teardownRace() {
   try { if (r.speedo) r.speedo.destroy(); } catch (_) { /* visual only */ }
   hudBanner.reconnecting = false; hudBanner.respawnUntil = 0; hudBanner.wrongWay = null;
   refreshBanner();
+  try { audio.engineStop(); } catch (_) { /* audio only */ }
   state.race = null;
 }
 
@@ -854,6 +865,7 @@ function finishRace() {
     }
   }
   try { ui.renderProgress(progressData); } catch (_) { /* results must still show */ }
+  try { if (finished) audio.resultsSting(); } catch (_) { /* audio only */ }
   // Populate immediately from the cached room (don't wait for the next network
   // event) - onRoomChange keeps it live-updating as stragglers finish after this.
   ui.renderMultiplayerBoard(online ? computeResultsBoard(roomBeforeTeardown) : null);
@@ -883,6 +895,7 @@ function onCollide(impact) {
   const r = state.race;
   if (!r || !r.ready) return;
   cameraRig.shake(Math.min(1, impact / 12));
+  try { audio.collision(impact); } catch (_) { /* audio only */ }
   if (impact > HEALTH_DAMAGE_HARD_THRESHOLD) {
     const damage = Math.min(HEALTH_MAX_DAMAGE_PER_HIT,
       Math.max(HEALTH_MIN_DAMAGE_PER_HIT, (impact - HEALTH_DAMAGE_HARD_THRESHOLD) * HEALTH_DAMAGE_SCALE));
@@ -1009,6 +1022,11 @@ function updateRace(dt) {
   if (r.phase === "countdown") {
     const remaining = (r.countdownEnd - now) / 1000;
     ui.setHudCenter(remaining <= 0 ? "GO!" : String(Math.ceil(remaining)));
+    try {
+      const n = Math.ceil(remaining);
+      if (remaining > 0 && n <= 3 && n !== r.lastCountN) { r.lastCountN = n; audio.countdownBeep(); }
+      if (remaining <= 0) audio.goBeep();
+    } catch (_) { /* audio only */ }
     if (remaining <= 0) {
       r.phase = "racing";
       r.startedAt = now;
@@ -1071,10 +1089,12 @@ function updateRace(dt) {
   r.veh.setBoost(pk.boosted ? r.pickups.BOOST_FORCE_N : 0);
   for (const c of pk.collected) {
     if (c.kind === "boost") {
+      try { audio.boostWhoosh(); } catch (_) { /* audio only */ }
       ui.toast("BOOST!", "ok", 1000);
     } else if (c.kind === "repair") {
       r.health = Math.min(HEALTH_MAX, r.health + r.pickups.REPAIR_AMOUNT);
       ui.setHudHealth(r.health);
+      try { audio.repairChime(); } catch (_) { /* audio only */ }
       ui.toast("REPAIRED!", "ok", 1000);
     }
   }
@@ -1095,6 +1115,7 @@ function updateRace(dt) {
     r.pendingRespawn = false;
     resetCar();
     hudBanner.respawnUntil = performance.now() + BANNER_RESPAWN_MS;
+    try { audio.respawnSweep(); } catch (_) { /* audio only */ }
     r.health = HEALTH_RESPAWN_PCT;
     ui.setHudHealth(r.health);
     ui.toast("Car totaled - back on track, partially repaired.", "warn", 2200);
@@ -1102,6 +1123,20 @@ function updateRace(dt) {
 
   try { updateWrongWay(r, near, body, dt); } catch (_) { /* never let it break racing */ }
   refreshBanner();
+
+  // Audio (engine follows speed/throttle; slip = sideways velocity share; beeps for warnings).
+  try {
+    _side.set(0, 0, 1).applyQuaternion(r.rig.root.quaternion);
+    const vLat = Math.abs(body.velocity.x * _side.x + body.velocity.z * _side.z);
+    const slip = kmh > 30 ? Math.max(0, Math.min(1, (vLat - 2) / 8)) : 0;
+    audio.engineUpdate({
+      kmh, throttle: input.throttle > 0 ? input.throttle : 0, boost: pk.boosted,
+      slip, countdown: r.phase === "countdown",
+    });
+    audio.reportFrame(dt);
+    if (hudBanner.wrongWay !== r.lastWW) { if (hudBanner.wrongWay != null) audio.wrongWayBeep(); r.lastWW = hudBanner.wrongWay; }
+    if (r.phase === "racing" && r.health < 25 && now - r.lowHpAt > 1200) { r.lowHpAt = now; audio.lowHpBeep(); }
+  } catch (_) { /* audio only */ }
 
   // Minimap (Task 3): local player only for now - see minimap.js. Heading uses
   // the same atan2(-fwd.z, fwd.x) convention track.js's own samples use.
@@ -1141,6 +1176,7 @@ function onCheckpoint(i) {
     r.lap += 1;
     if (r.lap > TRACK_CONFIG.laps) {
       r.phase = "finished";
+      try { audio.finishFanfare(); audio.engineStop(); } catch (_) { /* audio only */ }
       ui.setHudCenter("FINISH");
       commentate("race_finish").then((line) => line && ui.showCommentary(line));
       if (r.online) {
@@ -1154,6 +1190,7 @@ function onCheckpoint(i) {
       return;
     }
     ui.setHudLap(r.lap, TRACK_CONFIG.laps);
+    try { audio.lapDing(); } catch (_) { /* audio only */ }
     const evt = r.lap === TRACK_CONFIG.laps ? "final_lap" : "lap_complete";
     commentate(evt).then((line) => line && ui.showCommentary(line));
   }
@@ -1211,7 +1248,7 @@ function frame() {
 // Boot
 // ---------------------------------------------------------------------------
 // Dev handle for the console / automated checks (harmless in the demo).
-window.ER = { state, cameraRig, TUNING, keys, camera, THREE, mp, remotes, computeLeaderboard, computeResultsBoard, updateRace, hudBanner, showcase, prog, renderer, raceScene, dumpHero, gridPoseFor, gridOffsets };
+window.ER = { state, cameraRig, TUNING, keys, camera, THREE, mp, remotes, computeLeaderboard, computeResultsBoard, updateRace, hudBanner, showcase, prog, renderer, raceScene, dumpHero, gridPoseFor, gridOffsets, audio };
 
 // WebGL context loss (GPU reset, driver hiccup, tab throttling): keep the page alive and
 // rebuild what lives in GPU memory that three.js can't restore on its own - the PMREM
@@ -1231,6 +1268,7 @@ canvas.addEventListener("webglcontextrestored", () => {
   } catch (err) { console.warn("[gl] hero rebuild failed", err); }
 });
 
+audio.initAudio();
 preloadCarAssets();
 setShowcaseCar(getCar(state.carId));
 ui.showScreen("login");
