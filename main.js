@@ -11,20 +11,20 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=44";
-import * as ui from "./ui.js?v=44";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=44";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=44";
-import { buildTrack, TRACK_CONFIG, gridOffsets } from "./track.js?v=44";
-import { createCameraRig } from "./camera.js?v=44";
-import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=44";
-import { commentate } from "./ai-commentary.js?v=44";
-import * as mp from "./multiplayer.js?v=44";
-import { createPickups } from "./pickups.js?v=44";
-import { createMinimap } from "./minimap.js?v=44";
-import { createSpeedometer } from "./speedometer.js?v=44";
-import * as prog from "./progression.js?v=44";
-import * as audio from "./audio.js?v=44";
+import * as auth from "./auth.js?v=46";
+import * as ui from "./ui.js?v=46";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=46";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=46";
+import { buildTrack, getTrack, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=46";
+import { createCameraRig } from "./camera.js?v=46";
+import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=46";
+import { commentate } from "./ai-commentary.js?v=46";
+import * as mp from "./multiplayer.js?v=46";
+import { createPickups } from "./pickups.js?v=46";
+import { createMinimap } from "./minimap.js?v=46";
+import { createSpeedometer } from "./speedometer.js?v=46";
+import * as prog from "./progression.js?v=46";
+import * as audio from "./audio.js?v=46";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera
@@ -191,9 +191,17 @@ const raceScene = new THREE.Scene();
 raceScene.environment = envMap;
 const world = createWorld();
 let track = null;
-function ensureTrack() {
-  if (!track) track = buildTrack(raceScene, world);
+/** The built track for `id` (rebuilt if a different track was loaded). */
+function ensureTrack(id = state.trackId) {
+  if (track && track.id !== id) disposeTrack();
+  if (!track) track = buildTrack(id, world, raceScene);
   return track;
+}
+/** Free the current track's scene objects, GPU resources and physics bodies. */
+function disposeTrack() {
+  if (!track) return;
+  try { track.dispose(); } catch (err) { console.warn("[track] dispose failed", err); }
+  track = null;
 }
 const cameraRig = createCameraRig(camera);
 
@@ -202,7 +210,8 @@ const cameraRig = createCameraRig(camera);
 // creating/disposing them per race put a multi-hundred-ms shader compile inside every countdown.
 let pickupsCtl = null;
 function ensurePickups(t) {
-  if (!pickupsCtl) pickupsCtl = createPickups(raceScene, t);
+  if (!pickupsCtl) pickupsCtl = createPickups(raceScene);
+  pickupsCtl.configure(t);
   return pickupsCtl;
 }
 
@@ -370,9 +379,7 @@ function removeRemotePuppet(uid) {
 function gridPoseFor(t, view, uid) {
   let slot = mp.slotFor(view, uid);
   if (slot < 0) slot = view.players.length; // not listed (shouldn't happen): last row
-  const g = gridOffsets(slot);
-  const pose = t.startPose(g.back, g.lateral);
-  return { slot: g.slot, position: pose.position, yaw: pose.yaw, back: g.back, lateral: g.lateral };
+  return t.gridSlot(slot);
 }
 
 /** Called from every room update while state.screen === "race": builds/updates/
@@ -433,6 +440,7 @@ const state = {
   screen: "login",
   player: null,
   carId: DEFAULT_CAR_ID,
+  trackId: DEFAULT_TRACK_ID,
   race: null,
   mpStartAt: null,   // local Date.now() time the next online race's countdown ends
   lastRaceOnline: false, // was the just-finished race online? (drives the results screen)
@@ -779,7 +787,7 @@ const WARMUP_MAX_MS = 5000;
 async function startRace() {
   teardownRace();
   ui.setLoading("Loading race...");
-  ui.setHudLap(1, TRACK_CONFIG.laps);
+  ui.setHudLap(1, getTrack(state.trackId).laps);
   ui.setHudTime(0);
   ui.setHudSpeed(0);
   ui.setHudBest(null);
@@ -937,7 +945,7 @@ function finishRace() {
         finishMs: laps.reduce((a, b) => a + b, 0),
         healthLeft,
         place: place || 99, players: place ? players : 1,
-        parTimeMs: prog.parTimeMs(TRACK_CONFIG.laps, r.track.length),
+        parTimeMs: prog.parTimeMs(r.track.laps, r.track.length),
       });
       progressData = { ...prog.applyRaceResult(progressUid(), xp), players: place ? players : 1 };
       if (progressData.leveledUp) ui.toast(`Level up! You reached level ${progressData.level.lvl}`, "ok", 3200);
@@ -1138,7 +1146,7 @@ function updateRace(dt) {
   // one ever fails to stop the car (centre beyond the wall's inner face) put it back at the
   // boundary, kill the outward velocity and apply wall damage ONCE per breach. Scalars only.
   try {
-    const wallFace = t.halfWidth + TRACK_CONFIG.barrierOffset;
+    const wallFace = t.halfWidth + t.barrierOffset;
     const post = t.nearest(body.position);
     if (post.dist > wallFace) {
       const ps = post.sample, d = post.dist || 1;
@@ -1154,7 +1162,7 @@ function updateRace(dt) {
   } catch (_) { /* never let the safety net break racing */ }
 
   // Auto-recover if flipped, fallen, or stranded outside the barriers.
-  const stranded = near.dist > t.halfWidth + TRACK_CONFIG.barrierOffset + 1.5;
+  const stranded = near.dist > t.halfWidth + t.barrierOffset + 1.5;
   r.upsideDownFor = (r.veh.isUpsideDown() || stranded) ? r.upsideDownFor + dt : 0;
   r.onSideFor = r.veh.isOnSide() ? (r.onSideFor || 0) + dt : 0;
   if (r.upsideDownFor > 1.5 || body.position.y < -5) resetCar();
@@ -1283,7 +1291,7 @@ function onCheckpoint(i) {
     r.lapStartedAt = now;
     ui.setHudBest(Math.min(...r.lapTimes));
     r.lap += 1;
-    if (r.lap > TRACK_CONFIG.laps) {
+    if (r.lap > r.track.laps) {
       r.phase = "finished";
       try { audio.finishFanfare(); audio.engineStop(); } catch (_) { /* audio only */ }
       ui.setHudCenter("FINISH");
@@ -1298,9 +1306,9 @@ function onCheckpoint(i) {
       setTimeout(() => { if (state.race === r) finishRace(); }, 2200);
       return;
     }
-    ui.setHudLap(r.lap, TRACK_CONFIG.laps);
+    ui.setHudLap(r.lap, r.track.laps);
     try { audio.lapDing(); } catch (_) { /* audio only */ }
-    const evt = r.lap === TRACK_CONFIG.laps ? "final_lap" : "lap_complete";
+    const evt = r.lap === r.track.laps ? "final_lap" : "lap_complete";
     commentate(evt).then((line) => line && ui.showCommentary(line));
   }
   r.nextCp = (i + 1) % r.track.checkpoints.length;
@@ -1366,7 +1374,7 @@ function frame() {
 // Boot
 // ---------------------------------------------------------------------------
 // Dev handle for the console / automated checks (harmless in the demo).
-window.ER = { state, cameraRig, TUNING, keys, camera, THREE, mp, remotes, computeLeaderboard, computeResultsBoard, updateRace, hudBanner, showcase, prog, renderer, raceScene, dumpHero, gridPoseFor, gridOffsets, audio, updateRemotesFromView, perfSummary };
+window.ER = { state, cameraRig, TUNING, keys, camera, THREE, mp, remotes, computeLeaderboard, computeResultsBoard, updateRace, hudBanner, showcase, prog, renderer, raceScene, dumpHero, gridPoseFor, gridOffsets, audio, updateRemotesFromView, perfSummary, ensureTrack, disposeTrack };
 
 // WebGL context loss (GPU reset, driver hiccup, tab throttling): keep the page alive and
 // rebuild what lives in GPU memory that three.js can't restore on its own - the PMREM

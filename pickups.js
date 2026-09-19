@@ -29,7 +29,6 @@
 // ============================================================================
 
 import * as THREE from "three";
-import { PICKUP_SPAWN_U, REPAIR_SPAWN_U } from "./track.js?v=44";
 
 const HOVER_HEIGHT = 1.3;       // m above the road
 const TRIGGER_RADIUS = 3.2;     // m, proximity trigger (generous - arcade feel)
@@ -82,18 +81,18 @@ function buildRepairMesh() {
 
 /**
  * @param scene  THREE.Scene to add pickup meshes to (the race scene)
- * @param track  the object buildTrack() returns (needs .sampleAt(u))
+ * @param track  optional: a built track (needs .pickups); the pool is pointed at it immediately.
+ *               Later calls to controller.configure(track) re-point the SAME pooled meshes/lights.
  */
 export function createPickups(scene, track) {
-  const specs = [
-    ...PICKUP_SPAWN_U.map((u, i) => ({ id: `boost-${i}`, u, kind: "boost" })),
-    ...REPAIR_SPAWN_U.map((u, i) => ({ id: `repair-${i}`, u, kind: "repair" })),
-  ];
-  const pickups = specs.map((spec, i) => {
-    const s = track.sampleAt(spec.u);
-    const position = s.p.clone().add(new THREE.Vector3(0, HOVER_HEIGHT, 0));
-    const mesh = spec.kind === "boost" ? buildBoostMesh() : buildRepairMesh();
-    mesh.position.copy(position);
+  // Fixed pool: 6 boost + 3 repair slots, created once. Every track supplies exactly that many
+  // (track.pickups); configure(track) only MOVES the pooled meshes/lights, never adds or removes any,
+  // so the scene's light count is constant across tracks.
+  const BOOST_SLOTS = 6, REPAIR_SLOTS = 3;
+  const pickups = [];
+  for (let i = 0; i < BOOST_SLOTS + REPAIR_SLOTS; i++) {
+    const kind = i < BOOST_SLOTS ? "boost" : "repair";
+    const mesh = kind === "boost" ? buildBoostMesh() : buildRepairMesh();
     scene.add(mesh);
     // The PointLight must stay VISIBLE for the pickup's whole life: three.js rebuilds
     // every lit material's shader whenever the number of visible lights changes, which
@@ -102,12 +101,30 @@ export function createPickups(scene, track) {
     const light = mesh.children.find((c) => c.isLight);
     const parts = mesh.children.filter((c) => !c.isLight);
     const lightIntensity = light ? light.intensity : 0;
-    return { ...spec, position, mesh, light, parts, lightIntensity, available: true, respawnAt: 0, phase: i * 1.7 };
-  });
+    pickups.push({ id: `${kind}-${i}`, kind, u: 0, position: new THREE.Vector3(), mesh, light, parts, lightIntensity, available: true, respawnAt: 0, phase: i * 1.7 });
+  }
 
   function setShown(p, shown) {
     for (const c of p.parts) c.visible = shown;
     if (p.light) p.light.intensity = shown ? p.lightIntensity : 0;
+  }
+
+  /** Point the pool at a track's pickup layout (track.pickups: [{kind, t, position}]) and re-arm it. */
+  function configure(tr) {
+    const boosts = tr.pickups.filter((p) => p.kind === "boost");
+    const repairs = tr.pickups.filter((p) => p.kind === "repair");
+    pickups.forEach((p, i) => {
+      const src = p.kind === "boost" ? boosts[i] : repairs[i - BOOST_SLOTS];
+      p.available = !!src;
+      p.respawnAt = 0;
+      if (src) {
+        p.u = src.t;
+        p.position.copy(src.position).add(new THREE.Vector3(0, HOVER_HEIGHT, 0));
+        p.mesh.position.copy(p.position);
+      }
+      setShown(p, !!src);
+    });
+    boostUntil = 0;
   }
 
   let boostUntil = 0;
@@ -163,5 +180,6 @@ export function createPickups(scene, track) {
     }
   }
 
-  return { update, reset, dispose, BOOST_FORCE_N, REPAIR_AMOUNT };
+  if (track) configure(track);
+  return { update, reset, configure, dispose, BOOST_FORCE_N, REPAIR_AMOUNT };
 }

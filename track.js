@@ -13,43 +13,73 @@
 import * as THREE from "three";
 import * as CANNON from "cannon-es";
 
-// Larger-track pass: TRACK_POINTS and every size below are scaled by SCALE (2.2x,
-// within the asked 2-2.5x range) from the original circuit, uniformly - same shape,
-// same corner-radii logic (untouched), just bigger. width/barrierOffset/curb size
-// scale by the same factor so the road doesn't look like a thread lost in a huge
-// landscape at the new scale. bounds + sky radius + fog near/far (see buildTrack
-// below) and the camera far-plane (main.js) are scaled by the same factor too, which
-// preserves the exact same edge-of-world/fog-falloff ratios the original had -
-// whatever was already comfortably hidden stays comfortably hidden at the new size.
+// ---------------------------------------------------------------------------
+// TRACK DATA. A track is a plain data object; buildTrack(id, ...) turns it into geometry,
+// colliders and helpers. Everything is FLAT (y = 0): physics is a flat ground plane.
+//   {id, name, place, weatherLabel, controlPoints (closed Catmull-Rom loop, x/z metres),
+//    width, laps, checkpointCount, pickups:[{kind, t}] (t = fraction along the loop),
+//    startT, themeId, difficulty, samples, groundHalf}
+// Pickups are always 6 boost + 3 repair on every track: the pooled pickup controller owns one
+// point light per pickup, and the scene's light count must never change (see pickups.js).
+// ---------------------------------------------------------------------------
+
+// Larger-track pass: Track 1's control points and every size below are scaled by SCALE (2.2x,
+// within the asked 2-2.5x range) from the original circuit, uniformly - same shape, same
+// corner-radii logic (untouched), just bigger. width/barrierOffset/curb size scale by the same
+// factor so the road doesn't look like a thread lost in a huge landscape at the new scale.
 const SCALE = 2.2;
 
+// Shared (not per-track) constants. laps / checkpoints / width live in the track data now;
+// they stay here only for anything that still imports the old single-track config.
 export const TRACK_CONFIG = {
-  width: Math.round(16 * SCALE),            // road width (m). Widened from 12 originally: even
-                         // well-tuned fixed-angle keyboard steering can't exactly track a
-                         // continuously-varying curve, so a bit more room for a slightly-off
-                         // line before it counts as "off the asphalt" makes normal driving
-                         // far more forgiving without touching how the car itself handles.
+  width: Math.round(16 * SCALE),
   laps: 3,
-  checkpoints: 4,       // gates spread evenly along the loop (index 0 = start/finish) -
-                         // c/checkpoints stays a fraction of the loop, so this stays evenly
-                         // distributed automatically as the spline gets bigger.
-  samples: 420,         // ribbon resolution (unchanged - not a "size", corner-radii logic
-                         // untouched per spec; sampling density scales with the track for free)
+  checkpoints: 4,
+  samples: 420,
   curbSpacing: +(2.6 * SCALE).toFixed(2),     // m between curb blocks
-  barrierSpacing: +(4.0 * SCALE).toFixed(2),  // m between barrier segments
+  barrierSpacing: +(4.0 * SCALE).toFixed(2),  // m between barrier segments (legacy; walls now follow the samples)
   barrierOffset: Math.round(6 * SCALE),  // m from road edge to barrier centre - more grass
                          // shoulder to run through before hitting a hard collision
-  treeCount: 260,        // grown for the bigger play area, short of a full area-scale
-                         // (170 * SCALE^2 would be ~820) to keep the instanced draw count sane
+  treeCount: 260,
   bounds: Math.round(340 * SCALE),          // half-size of grass plane
 };
 
-// Control points of the centreline (x, z), scaled SCALE x from the original circuit.
-// y is 0 everywhere. Closed loop.
-export const TRACK_POINTS = [
+// Track 1 "Green Valley": the original circuit, unchanged.
+const GREEN_VALLEY_POINTS = [
   [-60, 0], [60, 0], [130, -25], [155, -90], [115, -150], [45, -120],
   [-15, -160], [-100, -140], [-150, -70], [-135, 10], [-105, 32],
 ].map(([x, z]) => [x * SCALE, z * SCALE]);
+
+const boost = (t) => ({ kind: "boost", t });
+const repair = (t) => ({ kind: "repair", t });
+
+export const TRACKS = [
+  {
+    id: "green-valley",
+    name: "Green Valley",
+    place: "Lowland countryside",
+    weatherLabel: "Sunny",
+    controlPoints: GREEN_VALLEY_POINTS,
+    width: Math.round(16 * SCALE),
+    laps: 3,
+    checkpointCount: 4,
+    // Fixed fractions around the loop, deliberately offset from the checkpoint gates (0, .25, .5,
+    // .75) and the start/finish grandstand so they don't crowd either.
+    pickups: [boost(0.08), boost(0.18), boost(0.36), boost(0.58), boost(0.7), boost(0.88),
+              repair(0.13), repair(0.47), repair(0.81)],
+    startT: 0,
+    themeId: "sunny",
+    difficulty: "Medium",
+    samples: 420,        // ribbon resolution (~4.4 m per sample)
+    groundHalf: Math.round(340 * SCALE),
+    treeCount: 260,
+  },
+];
+
+export const DEFAULT_TRACK_ID = TRACKS[0].id;
+export function listTracks() { return TRACKS.slice(); }
+/** Track data by id; an unknown id falls back to the default track (never throws). */
+export function getTrack(id) { return TRACKS.find((t) => t.id === id) || TRACKS[0]; }
 
 // Starting grid (multiplayer): 2 columns, rows BEHIND the start line along the track
 // tangent, up to 8 slots. Spacing is larger than the 6 m / 3.5 m minimum on purpose: the
@@ -62,18 +92,6 @@ export function gridOffsets(slot) {
   // lateral: + = left of travel (same sign convention as startPose's `lateral`).
   return { slot: s, back: GRID.firstBackM + row * GRID.rowM, lateral: (col === 0 ? -1 : 1) * GRID.colM / 2 };
 }
-
-// Boost pickup spawn points (Task 1): fixed fractions around the loop (u, same
-// convention as sampleAt/checkpoints), picked once here rather than randomised per
-// frame. Deliberately offset from the checkpoint gates (0, 0.25, 0.5, 0.75) and the
-// start/finish grandstand so they don't visually crowd either. Positions are resolved
-// to world space by the caller via the built track's own sampleAt(u), not here - this
-// module only owns the fixed layout data, same split as TRACK_POINTS/TRACK_CONFIG above.
-export const PICKUP_SPAWN_U = [0.08, 0.18, 0.36, 0.58, 0.7, 0.88];
-
-// Repair pickup spawn points (health revision): fewer and spaced apart from both
-// the boost spawns above and the checkpoint gates, same fixed-list convention.
-export const REPAIR_SPAWN_U = [0.13, 0.47, 0.81];
 
 const Y_UP = new THREE.Vector3(0, 1, 0);
 
@@ -183,15 +201,24 @@ function makeSky() {
 
 // ---------------------------------------------------------------------------
 
-export function buildTrack(scene, world) {
-  const cfg = TRACK_CONFIG;
+/**
+ * Build a track from its data. Adds the group (and, until the theme system takes over, the sky,
+ * lights and fog) to `scene`, adds the physics ground + wall colliders to `world`, and returns the
+ * helper object every consumer uses. dispose() undoes ALL of it.
+ */
+export function buildTrack(id, world, scene) {
+  const T = getTrack(id);
+  const cfg = { ...TRACK_CONFIG, width: T.width, laps: T.laps, checkpoints: T.checkpointCount,
+                samples: T.samples, bounds: T.groundHalf, treeCount: T.treeCount ?? TRACK_CONFIG.treeCount };
   const hw = cfg.width / 2;
   const group = new THREE.Group();
   group.name = "track";
+  const envObjects = []; // scene-level objects this build added (removed + disposed in dispose())
+  const physicsBodies = [];
 
   // --- Centreline curve -----------------------------------------------------
   const curve = new THREE.CatmullRomCurve3(
-    TRACK_POINTS.map(([x, z]) => new THREE.Vector3(x, 0, z)),
+    T.controlPoints.map(([x, z]) => new THREE.Vector3(x, 0, z)),
     true,
     "centripetal"
   );
@@ -209,11 +236,13 @@ export function buildTrack(scene, world) {
   }
 
   // --- Sky + fog + lights ---------------------------------------------------
-  scene.add(makeSky());
+  const skyMesh = makeSky();
+  scene.add(skyMesh);
   scene.background = new THREE.Color(0xdfe9f3);
   scene.fog = new THREE.Fog(0xdfe9f3, 180 * SCALE, 900 * SCALE);
 
-  scene.add(new THREE.HemisphereLight(0xbfd8ff, 0x3f6b2a, 0.55));
+  const hemi = new THREE.HemisphereLight(0xbfd8ff, 0x3f6b2a, 0.55);
+  scene.add(hemi);
   const sun = new THREE.DirectionalLight(0xfff2dc, 2.4);
   sun.position.set(60, 110, 40);
   sun.castShadow = true;
@@ -227,6 +256,7 @@ export function buildTrack(scene, world) {
   sun.shadow.normalBias = 0.02;
   scene.add(sun);
   scene.add(sun.target);
+  envObjects.push(skyMesh, hemi, sun, sun.target);
 
   // --- Ground ---------------------------------------------------------------
   const ground = new THREE.Mesh(
@@ -242,6 +272,7 @@ export function buildTrack(scene, world) {
   groundBody.addShape(new CANNON.Plane());
   groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
   world.addBody(groundBody);
+  physicsBodies.push(groundBody);
 
   // --- Road ribbon ----------------------------------------------------------
   {
@@ -370,6 +401,7 @@ export function buildTrack(scene, world) {
     // Compute it explicitly now that the shapes are in place.
     wallBody.updateAABB();
     world.addBody(wallBody);
+    physicsBodies.push(wallBody);
     mesh.count = count;
     mesh.castShadow = mesh.receiveShadow = true;
     group.add(mesh);
@@ -413,13 +445,13 @@ export function buildTrack(scene, world) {
   // --- Start / finish line + gates -------------------------------------------
   const checkpoints = [];
   for (let c = 0; c < cfg.checkpoints; c++) {
-    const s = sampleAt(c / cfg.checkpoints);
+    const s = sampleAt(T.startT + c / cfg.checkpoints);
     checkpoints.push({ position: s.p.clone(), tangent: s.t.clone(), normal: s.n.clone(), halfWidth: hw + 1.5 });
     // Start/finish gets the big checkered gantry (Task 6) instead of a plain gate.
     group.add(c === 0 ? makeFinishGantry(s, hw) : makeGate(s, hw, false));
   }
   {
-    const s = samples[0];
+    const s = sampleAt(T.startT);
     const line = new THREE.Mesh(
       new THREE.BoxGeometry(3, 0.06, hw * 2),
       new THREE.MeshStandardMaterial({ map: checkerTexture(3, 12), roughness: 0.7 })
@@ -462,12 +494,64 @@ export function buildTrack(scene, world) {
 
   /** Pose a few metres behind the start line, facing along the track. */
   function startPose(backOffset = 7, lateral = 0) {
-    const s = samples[0];
+    const s = sampleAt(T.startT);
     const p = s.p.clone().addScaledVector(s.t, -backOffset).addScaledVector(s.n, lateral);
     return { position: p, yaw: s.yaw, tangent: s.t.clone() };
   }
 
-  return { group, curve, length, samples, checkpoints, sun, halfWidth: hw, nearest, startPose, sampleAt };
+  // --- new-interface helpers ---------------------------------------------------
+  /** Tangent at distance `s` metres along the loop (wraps). */
+  function tangentAt(s) { return sampleAt(s / length).t; }
+
+  /** Grid slot i behind the start line (2 columns, see gridOffsets): { slot, position, yaw, tangent }. */
+  function gridSlot(i) {
+    const g = gridOffsets(i);
+    const pose = startPose(g.back, g.lateral);
+    return { slot: g.slot, position: pose.position, yaw: pose.yaw, tangent: pose.tangent, back: g.back, lateral: g.lateral };
+  }
+
+  // Pickups resolved to world space (t = fraction along the loop, same lookup as everything else).
+  const pickups = T.pickups.map((pk, i) => {
+    const s = sampleAt(pk.t);
+    return { id: `${pk.kind}-${i}`, kind: pk.kind, t: pk.t, position: s.p.clone() };
+  });
+
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const s of samples) { minX = Math.min(minX, s.p.x); maxX = Math.max(maxX, s.p.x); minZ = Math.min(minZ, s.p.z); maxZ = Math.max(maxZ, s.p.z); }
+  const bounds = { minX, maxX, minZ, maxZ, groundHalf: cfg.bounds };
+
+  let disposed = false;
+  /** Free everything this build created: scene objects, GPU resources, physics bodies. Idempotent. */
+  function dispose() {
+    if (disposed) return;
+    disposed = true;
+    for (const b of physicsBodies) { try { world.removeBody(b); } catch (_) { /* already gone */ } }
+    for (const o of envObjects) scene.remove(o);
+    scene.remove(group);
+    const freed = new Set();
+    const freeMaterial = (m) => {
+      if (!m || freed.has(m)) return;
+      freed.add(m);
+      for (const k of Object.keys(m)) { const v = m[k]; if (v && v.isTexture && !freed.has(v)) { freed.add(v); v.dispose(); } }
+      m.dispose();
+    };
+    const freeObject = (o) => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(freeMaterial);
+      if (o.isInstancedMesh) o.dispose();
+      if (o.shadow && o.shadow.map) o.shadow.map.dispose();
+    };
+    group.traverse(freeObject);
+    envObjects.forEach((o) => o.traverse && o.traverse(freeObject));
+  }
+
+  scene.background = scene.background; // (kept: legacy environment above owns background/fog for now)
+  return {
+    id: T.id, name: T.name, place: T.place, weatherLabel: T.weatherLabel, themeId: T.themeId,
+    difficulty: T.difficulty, laps: T.laps, width: cfg.width, barrierOffset: cfg.barrierOffset,
+    group, curve, length, samples, checkpoints, pickups, sun, halfWidth: hw, bounds,
+    nearest, startPose, sampleAt, tangentAt, gridSlot, dispose,
+  };
 }
 
 // ---------------------------------------------------------------------------
