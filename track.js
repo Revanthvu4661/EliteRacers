@@ -305,37 +305,72 @@ export function buildTrack(scene, world) {
   }
 
   // --- Barriers (instanced + static physics boxes) ---------------------------
+  // One wall segment per centreline sample pair on each side, laid along the WALL LINE itself
+  // (the centreline offset by hw + barrierOffset), not on a fixed 8.8 m centreline grid. The old
+  // fixed spacing + fixed 14 m collider left holes on the OUTSIDE of tight corners, where the wall
+  // line is much longer than the centreline (e.g. R=32 m: wall segments 17 m apart, colliders 14 m).
+  // Each collider overlaps its neighbours by BARRIER_OVERLAP at both ends, is BARRIER_COLL_T thick
+  // extending OUTWARD (its inner face lies on the visible wall's inner face) and is tall enough
+  // that a car can't hop it.
   {
-    const segLen = cfg.barrierSpacing * 1.12;
-    const collLen = cfg.barrierSpacing * 1.6; // colliders overlap so tight outer curves never open a gap
-    const geo = new THREE.BoxGeometry(segLen, 1.0, 0.45);
-    const count = Math.floor(length / cfg.barrierSpacing) * 2;
-    const mesh = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ roughness: 0.7 }), count);
-    const m = new THREE.Matrix4();
+    const BARRIER_OVERLAP = 1.5;   // m beyond each segment end
+    const BARRIER_COLL_T = 2.2;    // m thick, extending away from the track
+    const BARRIER_COLL_H = 8;      // m tall (invisible)
+    const VIS_T = 0.45;
+    const OFF = hw + cfg.barrierOffset;
+    const geo = new THREE.BoxGeometry(1, 1.0, VIS_T); // unit length, scaled per instance
+    const mesh = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ roughness: 0.7 }), N * 2);
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), pos = new THREE.Vector3(), scl = new THREE.Vector3(), yAxis = new THREE.Vector3(0, 1, 0);
     const cWhite = new THREE.Color(0xf0f0f0), cRed = new THREE.Color(0xd8262a), cBlue = new THREE.Color(0x2a5cd8);
-    // Collider is much thicker + taller than the visual wall (offset outward) so a
-    // car at 200 km/h can't tunnel through or hop it. Inner face matches the visual.
-    const COLL_T = 1.8, COLL_H = 8;
-    const shape = new CANNON.Box(new CANNON.Vec3(collLen / 2, COLL_H / 2, COLL_T / 2));
-    let i = 0;
-    const per = count / 2;
-    for (let k = 0; k < per; k++) {
-      const s = sampleAt(k * cfg.barrierSpacing / length);
-      for (const side of [1, -1]) {
-        const p = s.p.clone().addScaledVector(s.n, side * (hw + cfg.barrierOffset));
-        m.makeRotationY(s.yaw);
-        m.setPosition(p.x, 0.5, p.z);
-        mesh.setMatrixAt(i, m);
-        mesh.setColorAt(i, k % 3 === 0 ? (side > 0 ? cRed : cBlue) : cWhite);
-        i++;
-        const body = new CANNON.Body({ mass: 0, shape });
-        const pc = p.clone().addScaledVector(s.n, side * (COLL_T / 2 - 0.225));
-        body.position.set(pc.x, COLL_H / 2, pc.z);
-        body.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), s.yaw);
-        world.addBody(body);
+    let count = 0;
+    // ALL wall segments are shapes of ONE static compound body. cannon keeps an O(n^2) collision
+    // matrix (and a per-step broadphase sweep) over every body in the world: 840 separate wall
+    // bodies made each physics step ~6x slower than the old 424. As one body the world has 3 bodies
+    // and the narrowphase only walks the segment shapes near the chassis.
+    const wallBody = new CANNON.Body({ mass: 0 });
+    const yAxisC = new CANNON.Vec3(0, 1, 0);
+    for (const side of [1, -1]) {
+      for (let i = 0; i < N; i++) {
+        const a = samples[i], c = samples[(i + 1) % N];
+        const ax = a.p.x + a.n.x * side * OFF, az = a.p.z + a.n.z * side * OFF;
+        const cx = c.p.x + c.n.x * side * OFF, cz = c.p.z + c.n.z * side * OFF;
+        const dx = cx - ax, dz = cz - az;
+        const len = Math.hypot(dx, dz);
+        if (len < 0.05) continue;
+        const yaw = Math.atan2(-dz, dx);
+        const mx = (ax + cx) / 2, mz = (az + cz) / 2;
+        // outward = away from the track, perpendicular to this segment (flipped if a tight inner
+        // corner reverses the segment's direction)
+        let ox = dz / len * side, oz = -dx / len * side;
+        if (ox * a.n.x * side + oz * a.n.z * side < 0) { ox = -ox; oz = -oz; }
+
+        // visible wall
+        q.setFromAxisAngle(yAxis, yaw);
+        pos.set(mx, 0.5, mz);
+        scl.set(len + 0.3, 1, 1);
+        m.compose(pos, q, scl);
+        mesh.setMatrixAt(count, m);
+        mesh.setColorAt(count, Math.floor(i / 2) % 3 === 0 ? (side > 0 ? cRed : cBlue) : cWhite);
+        count++;
+
+        // collider
+        const shape = new CANNON.Box(new CANNON.Vec3(len / 2 + BARRIER_OVERLAP, BARRIER_COLL_H / 2, BARRIER_COLL_T / 2));
+        const off = BARRIER_COLL_T / 2 - VIS_T / 2;
+        wallBody.addShape(
+          shape,
+          new CANNON.Vec3(mx + ox * off, BARRIER_COLL_H / 2, mz + oz * off),
+          new CANNON.Quaternion().setFromAxisAngle(yAxisC, yaw)
+        );
       }
     }
-    mesh.count = i;
+    // cannon computes a body's AABB when a shape is added and only refreshes it for bodies that
+    // MOVE. The old per-wall bodies were positioned after that, so every wall kept an AABB
+    // centred on the origin and the sweep-and-prune broadphase (sorted by AABB) skipped
+    // wall/car pairs depending on list order - cars drove through walls "in some places".
+    // Compute it explicitly now that the shapes are in place.
+    wallBody.updateAABB();
+    world.addBody(wallBody);
+    mesh.count = count;
     mesh.castShadow = mesh.receiveShadow = true;
     group.add(mesh);
   }

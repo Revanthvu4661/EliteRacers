@@ -11,20 +11,20 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=36";
-import * as ui from "./ui.js?v=36";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=36";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=36";
-import { buildTrack, TRACK_CONFIG, gridOffsets } from "./track.js?v=36";
-import { createCameraRig } from "./camera.js?v=36";
-import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=36";
-import { commentate } from "./ai-commentary.js?v=36";
-import * as mp from "./multiplayer.js?v=36";
-import { createPickups } from "./pickups.js?v=36";
-import { createMinimap } from "./minimap.js?v=36";
-import { createSpeedometer } from "./speedometer.js?v=36";
-import * as prog from "./progression.js?v=36";
-import * as audio from "./audio.js?v=36";
+import * as auth from "./auth.js?v=40";
+import * as ui from "./ui.js?v=40";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=40";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=40";
+import { buildTrack, TRACK_CONFIG, gridOffsets } from "./track.js?v=40";
+import { createCameraRig } from "./camera.js?v=40";
+import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=40";
+import { commentate } from "./ai-commentary.js?v=40";
+import * as mp from "./multiplayer.js?v=40";
+import { createPickups } from "./pickups.js?v=40";
+import { createMinimap } from "./minimap.js?v=40";
+import { createSpeedometer } from "./speedometer.js?v=40";
+import * as prog from "./progression.js?v=40";
+import * as audio from "./audio.js?v=40";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera
@@ -1043,6 +1043,25 @@ function updateRace(dt) {
   r.veh.setSurfaceGrip(near.dist > t.halfWidth + 0.9 ? TUNING.OFFROAD_GRIP : 1);
   r.veh.update(input, dt);
   stepWorld(world, dt);
+
+  // Safety net (Bug A): the walls are static colliders and now hold in every strike test, but if
+  // one ever fails to stop the car (centre beyond the wall's inner face) put it back at the
+  // boundary, kill the outward velocity and apply wall damage ONCE per breach. Scalars only.
+  try {
+    const wallFace = t.halfWidth + TRACK_CONFIG.barrierOffset;
+    const post = t.nearest(body.position);
+    if (post.dist > wallFace) {
+      const ps = post.sample, d = post.dist || 1;
+      const ux = (body.position.x - ps.p.x) / d, uz = (body.position.z - ps.p.z) / d;
+      body.position.x = ps.p.x + ux * (wallFace - 1.0);
+      body.position.z = ps.p.z + uz * (wallFace - 1.0);
+      const vOut = body.velocity.x * ux + body.velocity.z * uz;
+      if (vOut > 0) { body.velocity.x -= vOut * ux; body.velocity.z -= vOut * uz; }
+      if (!r.wallBreach) { r.wallBreach = true; onCollide(Math.max(vOut, 3)); }
+    } else if (post.dist < wallFace - 3) {
+      r.wallBreach = false;
+    }
+  } catch (_) { /* never let the safety net break racing */ }
 
   // Auto-recover if flipped, fallen, or stranded outside the barriers.
   const stranded = near.dist > t.halfWidth + TRACK_CONFIG.barrierOffset + 1.5;
