@@ -96,13 +96,13 @@ export const THEMES = {
     hemi: { sky: 0x3c4f7a, ground: 0x10141c, intensity: 0.42 },
     exposure: 0.95,
     ground: { kind: "concrete", base: "#262a31", roughness: 0.55, metalness: 0.15 },
-    road: { base: "#1b1e24", grain: 14, roughness: 0.24, metalness: 0.25, envMapIntensity: 2.4, wet: true },
+    road: { base: "#1b1e24", grain: 14, roughness: 0.32, metalness: 0.25, envMapIntensity: 2.2, wet: true },
     kerb: [0xe6c229, 0x1c1c1c],
     barrier: { white: 0x8a9099, a: 0xd9a800, b: 0x59606b, roughness: 0.6 },
     sceneryId: "port",
     particles: { type: "rain", count: 1700, speed: 46, area: 60 },
     lightning: { gapMin: 7, gapMax: 17, strength: 3.2, exposureBoost: 0.7 },
-    headlight: 2600,
+    headlight: 1500,
   },
 };
 
