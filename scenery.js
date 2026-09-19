@@ -16,7 +16,7 @@
 
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { getTheme, makeRng, hashString } from "./themes.js?v=50";
+import { getTheme, makeRng, hashString } from "./themes.js?v=51";
 
 const SLOW_FRAME_S = 0.022;
 const SLOW_FOR_S = 2;
