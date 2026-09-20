@@ -2,12 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Elite Racers</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏎️</text></svg>" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=87" />
+  <link rel="stylesheet" href="styles.css?v=88" />
 
   <!-- Import map: every module imports "three", "three/addons/..." and "cannon-es"
        by bare name. Change versions here, nowhere else. No build step. -->
@@ -59,6 +59,7 @@
       </div>
       <span class="topbar-right">
         <button class="btn btn-small btn-ghost btn-mute" title="Sound on (M)" aria-label="Toggle sound">&#128266;</button>
+        <button id="btn-touch-layout" class="btn btn-small btn-ghost" hidden>Steering: Left</button>
         <span id="coin-chip" class="chip coin-chip" title="Coins">&#9679; <span id="coin-balance">0</span></span>
         <button id="btn-garage" class="btn btn-small btn-ghost">Garage</button>
         <span id="player-chip" class="chip"></span>
@@ -228,6 +229,6 @@
   <!-- Toasts (errors, notices) -->
   <div id="toast-root"></div>
 
-  <script type="module" src="main.js?v=87"></script>
+  <script type="module" src="main.js?v=88"></script>
 </body>
 </html>

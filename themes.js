@@ -24,6 +24,7 @@
 // ============================================================================
 
 import * as THREE from "three";
+import { isMobile } from "./device.js?v=88";
 
 /** mulberry32: tiny seeded PRNG (deterministic scenery / textures). */
 export function makeRng(seed) {
@@ -302,7 +303,7 @@ export function createEnvironment(scene, renderer) {
   const sun = new THREE.DirectionalLight(0xfff2dc, 2.4);
   sun.position.set(60, 110, 40);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.mapSize.set(isMobile ? 1024 : 2048, isMobile ? 1024 : 2048);
   sun.shadow.camera.near = 10;
   sun.shadow.camera.far = 320;
   const S = 60;

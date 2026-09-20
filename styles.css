@@ -485,3 +485,47 @@ kbd {
 .toast.warn { border-color: rgba(255,184,0,0.5); }
 .toast.ok { border-color: rgba(61,220,132,0.5); }
 @keyframes toast-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+
+/* ---------- Touch controls (touch-controls.js; shown only on touch devices during a race) ---------- */
+#touch-controls { position: fixed; inset: 0; z-index: 30; pointer-events: none; }
+#touch-controls[hidden] { display: none; }
+#touch-controls, #touch-controls * { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; touch-action: none; -webkit-tap-highlight-color: transparent; }
+.tc-stick {
+  position: absolute; bottom: max(18px, env(safe-area-inset-bottom)); width: 180px; height: 180px; border-radius: 50%;
+  background: rgba(255,255,255,0.10); border: 2px solid rgba(255,255,255,0.35); pointer-events: auto;
+}
+.tc-stick::before, .tc-stick::after { content: ""; position: absolute; top: 50%; width: 0; height: 0; margin-top: -10px; border: 10px solid transparent; opacity: 0.5; }
+.tc-stick::before { left: 10px; border-right-color: #fff; border-left-width: 0; }
+.tc-stick::after { right: 10px; border-left-color: #fff; border-right-width: 0; }
+.tc-knob {
+  position: absolute; left: 50%; top: 50%; width: 76px; height: 76px; margin: -38px 0 0 -38px; border-radius: 50%;
+  background: rgba(255,255,255,0.35); border: 2px solid rgba(255,255,255,0.7);
+}
+.tc-pedals { position: absolute; bottom: max(18px, env(safe-area-inset-bottom)); display: flex; align-items: flex-end; gap: 16px; }
+.tc-pedal {
+  pointer-events: auto; font-family: var(--font-display); font-weight: 700; letter-spacing: 2px; font-size: 15px; color: #fff;
+  border-radius: 22px; border: 2px solid rgba(255,255,255,0.4); background: rgba(255,255,255,0.12); padding: 0;
+}
+.tc-gas { width: 100px; height: 170px; background: rgba(61,220,132,0.22); border-color: rgba(61,220,132,0.6); }
+.tc-brake { width: 100px; height: 120px; background: rgba(255,59,59,0.22); border-color: rgba(255,59,59,0.6); }
+.tc-pedal.held { background: rgba(255,255,255,0.4); }
+/* Layout swap = pure CSS positioning off data-layout ("left" = steering on the left). */
+#touch-controls[data-layout="left"] .tc-stick { left: 28px; }
+#touch-controls[data-layout="left"] .tc-pedals { right: 28px; }
+#touch-controls[data-layout="right"] .tc-stick { right: 28px; }
+#touch-controls[data-layout="right"] .tc-pedals { left: 28px; flex-direction: row-reverse; }
+
+/* Touch HUD: clear the bottom corners for the thumbs; drop the keyboard hint. */
+html.touch .hud-controls { display: none; }
+html.touch .hud-bottom-right { right: 50%; transform: translateX(50%); bottom: 10px; }
+html.touch .hud-speedo { transform: scale(0.7); transform-origin: bottom center; }
+html.touch .hud-bottom-left { left: 50%; transform: translateX(-50%); bottom: auto; top: 22px; }
+html.touch .hud-commentary { bottom: auto; top: 70px; }
+html.touch .car-list { -webkit-overflow-scrolling: touch; }
+@media (max-height: 480px) {
+  .tc-stick { width: 150px; height: 150px; }
+  .tc-knob { width: 64px; height: 64px; margin: -32px 0 0 -32px; }
+  .tc-gas { width: 90px; height: 140px; } .tc-brake { width: 90px; height: 100px; }
+  html.touch .minimap { width: 100px; height: 100px; top: 120px; }
+  html.touch .hud-time { font-size: 24px; }
+}

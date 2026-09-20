@@ -11,8 +11,8 @@
 
 import * as THREE from "three";
 import * as CANNON from "cannon-es";
-import { getTheme, makeGroundTexture, makeRoadMaterial, hashString } from "./themes.js?v=87";
-import { ovalReady, buildOvalGroup } from "./oval-model.js?v=87";
+import { getTheme, makeGroundTexture, makeRoadMaterial, hashString } from "./themes.js?v=88";
+import { ovalReady, buildOvalGroup } from "./oval-model.js?v=88";
 
 // ---------------------------------------------------------------------------
 // TRACK DATA. A track is a plain data object; buildTrack(id, ...) turns it into geometry,

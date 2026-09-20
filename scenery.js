@@ -15,11 +15,12 @@
 // ============================================================================
 
 import * as THREE from "three";
+import { isMobile } from "./device.js?v=88";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { getTheme, makeRng, hashString } from "./themes.js?v=87";
-import { buildJungleModels } from "./jungle.js?v=87";
-import { buildJungleFx } from "./jungle-fx.js?v=87";
-import { createTreeAssets, THEME_TREES, TREE_QUALITY, pickQuality, makeWindUniform } from "./trees.js?v=87";
+import { getTheme, makeRng, hashString } from "./themes.js?v=88";
+import { buildJungleModels } from "./jungle.js?v=88";
+import { buildJungleFx } from "./jungle-fx.js?v=88";
+import { createTreeAssets, THEME_TREES, TREE_QUALITY, pickQuality, makeWindUniform } from "./trees.js?v=88";
 
 const SLOW_FRAME_S = 0.022;
 const SLOW_FOR_S = 2;
@@ -600,7 +601,7 @@ function createWeather(theme, group) {
   const P = theme.particles;
   if (!P) return null;
   const rnd = makeRng(hashString(theme.id) + 7);
-  const N = P.count;
+  const N = isMobile ? Math.ceil(P.count * 0.5) : P.count; // mobile: half the weather particles
   const R = P.area;
   let obj, positions, update, drawScale = 1, setDraw;
 

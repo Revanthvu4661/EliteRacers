@@ -12,34 +12,37 @@
 import * as THREE from "three";
 import * as CANNON from "cannon-es";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=87";
-import * as ui from "./ui.js?v=87";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=87";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=87";
-import { buildTrack, getTrack, listTracks, getTrackPreview, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=87";
-import { createCameraRig } from "./camera.js?v=87";
-import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets, preloadModel, isModelCached } from "./car-model.js?v=87";
-import { commentate } from "./ai-commentary.js?v=87";
-import * as mp from "./multiplayer.js?v=87";
-import { createPickups } from "./pickups.js?v=87";
-import { createMinimap } from "./minimap.js?v=87";
-import { createEnvironment, getTheme } from "./themes.js?v=87";
-import { preloadNature } from "./nature-models.js?v=87";
-import { preloadOval, ovalReady } from "./oval-model.js?v=87";
-import { buildScenery } from "./scenery.js?v=87";
-import { createSpeedometer } from "./speedometer.js?v=87";
-import * as prog from "./progression.js?v=87";
-import * as audio from "./audio.js?v=87";
+import * as auth from "./auth.js?v=88";
+import * as ui from "./ui.js?v=88";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=88";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=88";
+import { buildTrack, getTrack, listTracks, getTrackPreview, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=88";
+import { createCameraRig } from "./camera.js?v=88";
+import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets, preloadModel, isModelCached } from "./car-model.js?v=88";
+import { commentate } from "./ai-commentary.js?v=88";
+import * as mp from "./multiplayer.js?v=88";
+import { createPickups } from "./pickups.js?v=88";
+import { createMinimap } from "./minimap.js?v=88";
+import { createEnvironment, getTheme } from "./themes.js?v=88";
+import { preloadNature } from "./nature-models.js?v=88";
+import { preloadOval, ovalReady } from "./oval-model.js?v=88";
+import { buildScenery } from "./scenery.js?v=88";
+import { createSpeedometer } from "./speedometer.js?v=88";
+import * as prog from "./progression.js?v=88";
+import * as audio from "./audio.js?v=88";
+import { isMobile } from "./device.js?v=88";
+import { createTouchControls } from "./touch-controls.js?v=88";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera
 // ---------------------------------------------------------------------------
 const canvas = document.getElementById("game-canvas");
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+// Mobile path: no MSAA, lower pixel ratio, cheaper shadow filter (shadow map size is cut in themes.js).
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: !isMobile, powerPreference: "high-performance" });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.25 : 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = isMobile ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 
@@ -661,6 +664,19 @@ document.addEventListener("keyup", (e) => {
   if (k) keys.delete(k);
 });
 window.addEventListener("blur", () => keys.clear());
+
+// Touch controls feed the same `keys` set the keyboard does (same names), so readInput() is the only consumer.
+function setInputKey(name, down) { if (down) keys.add(name); else keys.delete(name); }
+const touchControls = createTouchControls({ setKey: setInputKey });
+
+// Layout toggle (car-select screen; only present on touch devices). Persists via touch-controls (localStorage).
+const btnTouchLayout = document.getElementById("btn-touch-layout");
+if (touchControls.enabled && btnTouchLayout) {
+  btnTouchLayout.hidden = false;
+  const paint = () => { btnTouchLayout.textContent = "Steering: " + (touchControls.getLayout() === "right" ? "Right" : "Left"); };
+  paint();
+  btnTouchLayout.addEventListener("click", () => { touchControls.setLayout(touchControls.getLayout() === "right" ? "left" : "right"); paint(); });
+}
 
 function readInput() {
   return {
@@ -1677,6 +1693,7 @@ function goTo(screen) {
   if (mp.getRoom() && !wantsRoom) mp.leaveRoom();
   state.screen = ui.showScreen(screen);
   keys.clear();
+  touchControls.setActive(screen === "race");
   if (screen === "select" || screen === "lobby") schedulePrewarm();
   if (screen === "tracks") renderTrackCards();
   if (screen === "select") { renderCarCards(); refreshCoins(); setShowcaseCar(skinnedCar(getCar(state.carId))); setTimeout(preloadRosterInBackground, 1200); }
