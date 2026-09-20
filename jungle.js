@@ -9,7 +9,7 @@
 // (both sides, the conservative reading of "inside of every corner").
 // ============================================================================
 import * as THREE from "three";
-import { getNature } from "./nature-models.js?v=71";
+import { getNature } from "./nature-models.js?v=73";
 
 const CHUNK_M = 60, UPDATE_MS = 250, HYST = 0.1;
 const COUNT = { high: 260, med: 180, low: 90, mobile: 0 };

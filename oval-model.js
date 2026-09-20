@@ -27,6 +27,7 @@ const CELL = 2;                       // m, height-map resolution
 const X0 = -620, X1 = 660, Z0 = -640, Z1 = 460;
 const FULL_M = 80, FADE_M = 220;      // re-level fully within FULL_M of the racing line, none beyond FADE_M
 const ROAD_TOP = 0.02;
+const ROAD_CLEAR_M = 12;              // props without colliders closer than this to the racing line are removed
 const HEIGHT_LAYERS = ["1GRASS", "0GRASS2", "1GRAVEL", "1TARMAC"]; // rasterised in this order (later wins)
 
 let scene = null, promise = null, prepared = false;
@@ -49,6 +50,18 @@ export function preloadOval() {
 
 // --- one-time preparation ----------------------------------------------------------------------
 function prepare(pts) {
+  const distToLine = (px, pz) => {
+    let best = 1e9;
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i], b = pts[(i + 1) % pts.length];
+      const dx = b[0] - a[0], dz = b[1] - a[1];
+      let t = ((px - a[0]) * dx + (pz - a[1]) * dz) / (dx * dx + dz * dz);
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const e = Math.hypot(px - a[0] - t * dx, pz - a[1] - t * dz);
+      if (e < best) best = e;
+    }
+    return best;
+  };
   scene.updateMatrixWorld(true);
   const GW = Math.ceil((X1 - X0) / CELL), GH = Math.ceil((Z1 - Z0) / CELL);
   const height = new Float32Array(GW * GH).fill(NaN);
@@ -108,15 +121,7 @@ function prepare(pts) {
       const h = height[gz * GW + gx];
       if (Number.isNaN(h)) continue;
       const px = X0 + (gx + 0.5) * CELL;
-      let best = 1e9;
-      for (let i = 0; i < pts.length; i++) {
-        const a = pts[i], b = pts[(i + 1) % pts.length];
-        const dx = b[0] - a[0], dz = b[1] - a[1];
-        let t = ((px - a[0]) * dx + (pz - a[1]) * dz) / (dx * dx + dz * dz);
-        t = t < 0 ? 0 : t > 1 ? 1 : t;
-        const e = Math.hypot(px - a[0] - t * dx, pz - a[1] - t * dz);
-        if (e < best) best = e;
-      }
+      const best = distToLine(px, pz);
       const w = best <= FULL_M ? 1 : best >= FADE_M ? 0 : 1 - (best - FULL_M) / (FADE_M - FULL_M);
       shift[gz * GW + gx] = w * (h - ROAD_TOP);
     }
@@ -138,6 +143,18 @@ function prepare(pts) {
         w.setFromMatrixPosition(inst);
         inst.elements[13] -= dyAt(w.x, w.z);
         o.setMatrixAt(i, inst);
+      }
+      // Props with no collider that stand ON the drivable road (traffic cones, plastic barriers) would be driven
+      // through: drop the instances within ROAD_CLEAR_M of the racing line, keep the rest.
+      if (/^(prop_cone|plastic_barrier)/.test(o.name)) {
+        let kept = 0;
+        for (let i = 0; i < o.count; i++) {
+          o.getMatrixAt(i, inst);
+          w.setFromMatrixPosition(inst);
+          if (distToLine(w.x, w.z) < ROAD_CLEAR_M) continue;
+          o.setMatrixAt(kept++, inst);
+        }
+        o.count = kept;
       }
       o.instanceMatrix.needsUpdate = true;
       o.userData.baked = "instanced";
