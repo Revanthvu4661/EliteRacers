@@ -11,23 +11,23 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=62";
-import * as ui from "./ui.js?v=62";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=62";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=62";
-import { buildTrack, getTrack, listTracks, getTrackPreview, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=62";
-import { createCameraRig } from "./camera.js?v=62";
-import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=62";
-import { commentate } from "./ai-commentary.js?v=62";
-import * as mp from "./multiplayer.js?v=62";
-import { createPickups } from "./pickups.js?v=62";
-import { createMinimap } from "./minimap.js?v=62";
-import { createEnvironment, getTheme } from "./themes.js?v=62";
-import { preloadNature } from "./nature-models.js?v=62";
-import { buildScenery } from "./scenery.js?v=62";
-import { createSpeedometer } from "./speedometer.js?v=62";
-import * as prog from "./progression.js?v=62";
-import * as audio from "./audio.js?v=62";
+import * as auth from "./auth.js?v=65";
+import * as ui from "./ui.js?v=65";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=65";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=65";
+import { buildTrack, getTrack, listTracks, getTrackPreview, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=65";
+import { createCameraRig } from "./camera.js?v=65";
+import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=65";
+import { commentate } from "./ai-commentary.js?v=65";
+import * as mp from "./multiplayer.js?v=65";
+import { createPickups } from "./pickups.js?v=65";
+import { createMinimap } from "./minimap.js?v=65";
+import { createEnvironment, getTheme } from "./themes.js?v=65";
+import { preloadNature } from "./nature-models.js?v=65";
+import { buildScenery } from "./scenery.js?v=65";
+import { createSpeedometer } from "./speedometer.js?v=65";
+import * as prog from "./progression.js?v=65";
+import * as audio from "./audio.js?v=65";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera

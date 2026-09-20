@@ -65,6 +65,19 @@ export const CARS = [
     engineSound: null,
     blurb: "Rockets off the line. Heavy but forgiving.",
   },
+  {
+    id: "rb19",
+    name: "RB19",
+    model: "./assets/models/rb19.glb", // optimised copy (Draco + 1024px WebP) of the 26 MB source
+    paintMaterial: null, // team livery: tint-disabled ("Stock only")
+    modelYaw: Math.PI, // same half-turn as the other cars (nose was facing the chase camera without it; verified in-race)
+    fit: {},
+    scale: 1,
+    color: 0x1b2a6b,
+    stats: { topSpeed: 1.0, acceleration: 0.9, handling: 0.4 },
+    engineSound: null,
+    blurb: "Pure downforce. Rocket on straights, edgy in corners.",
+  },
 ];
 
 export const DEFAULT_CAR_ID = CARS[0].id;
