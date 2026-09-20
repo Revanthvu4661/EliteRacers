@@ -19,7 +19,7 @@
 // ============================================================================
 
 import * as THREE from "three";
-import { makeRng } from "./themes.js?v=81";
+import { makeRng } from "./themes.js?v=83";
 
 function makeCanvas(w, h) {
   const c = document.createElement("canvas");

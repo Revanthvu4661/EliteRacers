@@ -235,6 +235,20 @@ const volMul = () => (profile.volumeMultiplier || 1) * (profile.loudnessComp || 
 
 /** Choose the engine profile for the next/current race (car select or race start). Safe to call any
  *  time: a running engine is reconfigured in place (no graph rebuild), otherwise it applies at start. */
+// Optional per-car `growl` (0..1): a mild tanh soft-clip (WaveShaperNode) between the engine voice and the
+// tone filter, for the turbo-heavy Nissan. Only routed in when growl > 0; every other car's graph is unchanged.
+const growlCurve = (g) => {
+  const k = 1 + g * 5, n = 1024, c = new Float32Array(n);
+  for (let i = 0; i < n; i++) { const x = (i / (n - 1)) * 2 - 1; c[i] = Math.tanh(x * k) / k; }
+  return c;
+};
+function applyGrowl(e) {
+  const g = profile.growl || 0;
+  e.gEng.disconnect();
+  if (g > 0) { e.shaper.curve = growlCurve(g); e.gEng.connect(e.shaper); e.shaper.connect(e.charF); }
+  else e.gEng.connect(e.charF);
+}
+
 export const setEngineProfile = safe((p) => {
   profile = Object.assign({}, NEUTRAL_PROFILE, p || {});
   if (eng && running()) {
@@ -242,6 +256,7 @@ export const setEngineProfile = safe((p) => {
     eng.charF.type = profile.filterType;
     eng.charF.frequency.setTargetAtTime(profile.filterFrequency, now, 0.02);
     eng.charF.Q.setTargetAtTime(profile.filterQ, now, 0.02);
+    applyGrowl(eng);
   }
 });
 
@@ -268,16 +283,18 @@ export const engineStart = safe(() => {
   const gEng = mk(ctx.createGain()); gEng.gain.value = 0;
   const gWhine = mk(ctx.createGain()); gWhine.gain.value = 0;
   const charF = mk(ctx.createBiquadFilter()); charF.type = profile.filterType; charF.Q.value = profile.filterQ; charF.frequency.value = profile.filterFrequency;
+  const shaper = mk(ctx.createWaveShaper());
   const bp = mk(ctx.createBiquadFilter()); bp.type = "bandpass"; bp.Q.value = 9; bp.frequency.value = 2400;
   const gSq = mk(ctx.createGain()); gSq.gain.value = 0;
   o1.connect(g1); o2.connect(g2); sub.connect(gs);
   g1.connect(lp); g2.connect(lp); gs.connect(lp);
   lp.connect(gEng); gEng.connect(charF); charF.connect(engBus); // charF = per-car tone (see setEngineProfile)
+  if (profile.growl > 0) { gEng.disconnect(); shaper.curve = growlCurve(profile.growl); gEng.connect(shaper); shaper.connect(charF); }
   whine.connect(gWhine); gWhine.connect(engBus);
   sq.connect(bp); bp.connect(gSq); gSq.connect(engBus);
   [o1, o2, sub, whine, sq].forEach((s) => { s.start(); sources.push(s); });
   liveNodes += nodes.length;
-  eng = { nodes, sources, o1, o2, sub, whine, lp, gEng, gWhine, bp, gSq, charF, rpm: IDLE_RPM, lastAt: 0, gear: 1, freq: 0 };
+  eng = { nodes, sources, o1, o2, sub, whine, lp, gEng, gWhine, bp, gSq, charF, shaper, rpm: IDLE_RPM, lastAt: 0, gear: 1, freq: 0 };
   // Ease in from silence.
   gEng.gain.setTargetAtTime(0.06 * volMul(), ctx.currentTime, 0.15);
 });

@@ -22,7 +22,7 @@
 //   color       hex paint colour (applied to the "body" mesh) + UI swatch
 //   stats       0..1 values shown on the select screen AND fed into physics.js
 //               (physics scales its base constants by these). Keep them distinct.
-//   audioProfile { basePitchOffset (octaves), filterType, filterFrequency (Hz), filterQ, volumeMultiplier }: per-car engine tone
+//   audioProfile { basePitchOffset (octaves), filterType, filterFrequency (Hz), filterQ, volumeMultiplier, [loudnessComp], [growl 0..1 soft-clip] }: per-car engine tone
 //   engineSound path to a loop in assets/sounds/ (stage 8). null => synth oscillator.
 // ============================================================================
 
@@ -107,7 +107,7 @@ export const CARS = [
     scale: 1,
     color: 0xf2b700,
     stats: { topSpeed: 0.8, acceleration: 0.85, handling: 0.92 },
-    audioProfile: { basePitchOffset: 0.15, filterType: "highpass", filterFrequency: 1100, filterQ: 1.2, volumeMultiplier: 1.05, loudnessComp: 1.9 },
+    audioProfile: { basePitchOffset: 0.1, filterType: "highpass", filterFrequency: 1000, filterQ: 1.0, volumeMultiplier: 1.05, loudnessComp: 1.9 },
     engineSound: null,
     blurb: "Precision engineering. Turns in like magic.",
   },
@@ -121,7 +121,7 @@ export const CARS = [
     scale: 1,
     color: 0x1f9e5a,
     stats: { topSpeed: 0.85, acceleration: 0.9, handling: 0.97 },
-    audioProfile: { basePitchOffset: 0.22, filterType: "highpass", filterFrequency: 1250, filterQ: 1.7, volumeMultiplier: 1.05, loudnessComp: 1.9 },
+    audioProfile: { basePitchOffset: 0.16, filterType: "highpass", filterFrequency: 1350, filterQ: 2.4, volumeMultiplier: 1.05, loudnessComp: 1.9 },
     engineSound: null,
     blurb: "Race-bred. Brakes later, corners harder.",
   },
@@ -135,7 +135,7 @@ export const CARS = [
     scale: 1,
     color: 0x7a2fd0,
     stats: { topSpeed: 0.88, acceleration: 0.92, handling: 0.55 },
-    audioProfile: { basePitchOffset: -0.06, filterType: "lowpass", filterFrequency: 1500, filterQ: 2.5, volumeMultiplier: 1.05 },
+    audioProfile: { basePitchOffset: -0.06, filterType: "lowpass", filterFrequency: 1100, filterQ: 2.5, volumeMultiplier: 1.05, growl: 0.5 },
     engineSound: null,
     blurb: "Widebody menace. All boost, no manners.",
   },
