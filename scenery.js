@@ -15,12 +15,12 @@
 // ============================================================================
 
 import * as THREE from "three";
-import { isMobile } from "./device.js?v=88";
+import { isMobile } from "./device.js?v=89";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { getTheme, makeRng, hashString } from "./themes.js?v=88";
-import { buildJungleModels } from "./jungle.js?v=88";
-import { buildJungleFx } from "./jungle-fx.js?v=88";
-import { createTreeAssets, THEME_TREES, TREE_QUALITY, pickQuality, makeWindUniform } from "./trees.js?v=88";
+import { getTheme, makeRng, hashString } from "./themes.js?v=89";
+import { buildJungleModels } from "./jungle.js?v=89";
+import { buildJungleFx } from "./jungle-fx.js?v=89";
+import { createTreeAssets, THEME_TREES, TREE_QUALITY, pickQuality, makeWindUniform } from "./trees.js?v=89";
 
 const SLOW_FRAME_S = 0.022;
 const SLOW_FOR_S = 2;

@@ -1,7 +1,7 @@
 // touch-controls.js - on-screen steering joystick + pedals. Pure input source: it calls the injected
 // setKey(name, down) with the SAME names the keyboard handler uses ("up"/"down"/"left"/"right"),
 // so main.js's `keys` set / readInput() remain the single input path.
-import { isTouchDevice } from "./device.js?v=88";
+import { isTouchDevice } from "./device.js?v=89";
 
 const LS_KEY = "er_touch_layout";
 const DEADZONE = 0.22; // fraction of joystick radius before steering engages
@@ -21,7 +21,8 @@ export function createTouchControls({ setKey }) {
     <div class="tc-pedals">
       <button class="tc-pedal tc-brake" id="tc-brake" type="button">BRAKE</button>
       <button class="tc-pedal tc-gas" id="tc-gas" type="button">GAS</button>
-    </div>`;
+    </div>
+    <div class="tc-rotate"><div class="tc-rotate-icon">&#128241;</div><p>Rotate your phone to landscape to race</p></div>`;
   document.body.appendChild(root);
 
   const stick = root.querySelector("#tc-stick");
@@ -85,6 +86,8 @@ export function createTouchControls({ setKey }) {
     },
     setActive(on) {
       root.hidden = !on;
+      // Best effort: Android Chrome only honours this in fullscreen/installed mode; the rotate overlay covers the rest.
+      try { if (on) screen.orientation?.lock?.("landscape").catch(() => {}); else screen.orientation?.unlock?.(); } catch (_) { /* unsupported */ }
       if (!on) { endStick(); for (const k of ["up", "down"]) setKey(k, false); root.querySelectorAll(".held").forEach((el) => el.classList.remove("held")); }
     },
   };

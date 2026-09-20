@@ -12,26 +12,26 @@
 import * as THREE from "three";
 import * as CANNON from "cannon-es";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=88";
-import * as ui from "./ui.js?v=88";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=88";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=88";
-import { buildTrack, getTrack, listTracks, getTrackPreview, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=88";
-import { createCameraRig } from "./camera.js?v=88";
-import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets, preloadModel, isModelCached } from "./car-model.js?v=88";
-import { commentate } from "./ai-commentary.js?v=88";
-import * as mp from "./multiplayer.js?v=88";
-import { createPickups } from "./pickups.js?v=88";
-import { createMinimap } from "./minimap.js?v=88";
-import { createEnvironment, getTheme } from "./themes.js?v=88";
-import { preloadNature } from "./nature-models.js?v=88";
-import { preloadOval, ovalReady } from "./oval-model.js?v=88";
-import { buildScenery } from "./scenery.js?v=88";
-import { createSpeedometer } from "./speedometer.js?v=88";
-import * as prog from "./progression.js?v=88";
-import * as audio from "./audio.js?v=88";
-import { isMobile } from "./device.js?v=88";
-import { createTouchControls } from "./touch-controls.js?v=88";
+import * as auth from "./auth.js?v=89";
+import * as ui from "./ui.js?v=89";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=89";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=89";
+import { buildTrack, getTrack, listTracks, getTrackPreview, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=89";
+import { createCameraRig } from "./camera.js?v=89";
+import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets, preloadModel, isModelCached } from "./car-model.js?v=89";
+import { commentate } from "./ai-commentary.js?v=89";
+import * as mp from "./multiplayer.js?v=89";
+import { createPickups } from "./pickups.js?v=89";
+import { createMinimap } from "./minimap.js?v=89";
+import { createEnvironment, getTheme } from "./themes.js?v=89";
+import { preloadNature } from "./nature-models.js?v=89";
+import { preloadOval, ovalReady } from "./oval-model.js?v=89";
+import { buildScenery } from "./scenery.js?v=89";
+import { createSpeedometer } from "./speedometer.js?v=89";
+import * as prog from "./progression.js?v=89";
+import * as audio from "./audio.js?v=89";
+import { isMobile } from "./device.js?v=89";
+import { createTouchControls } from "./touch-controls.js?v=89";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera

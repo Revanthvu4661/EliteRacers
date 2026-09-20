@@ -529,3 +529,30 @@ html.touch .car-list { -webkit-overflow-scrolling: touch; }
   html.touch .minimap { width: 100px; height: 100px; top: 120px; }
   html.touch .hud-time { font-size: 24px; }
 }
+
+/* Portrait phones: racing is landscape-only (overlay lives inside #touch-controls, so it only exists on touch devices). */
+.tc-rotate { display: none; }
+@media (orientation: portrait) {
+  .tc-rotate {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; position: absolute; inset: 0;
+    background: rgba(7,8,12,0.94); pointer-events: auto; text-align: center; padding: 24px;
+    font-family: var(--font-display); letter-spacing: 2px; font-size: 16px;
+  }
+  .tc-rotate-icon { font-size: 56px; animation: tc-rot 1.6s ease-in-out infinite; }
+  .tc-rotate p { margin: 0; }
+  .tc-stick, .tc-pedals { display: none; }
+}
+@keyframes tc-rot { 0%, 30% { transform: rotate(0); } 70%, 100% { transform: rotate(-90deg); } }
+
+/* Narrow screens (phones in portrait): menu bars wrap instead of overflowing; card strip clears the stacked buttons. */
+@media (max-width: 600px) {
+  .topbar { flex-wrap: wrap; gap: 8px; padding: 12px 14px; }
+  .topbar-right { flex-wrap: wrap; gap: 8px; }
+  .bottombar { padding: 12px 14px 16px; gap: 10px; }
+  .bottombar .btn-wide { min-width: 0; width: 100%; }
+  .car-list { margin-bottom: 150px; }
+  .car-loading { top: 196px; }
+  .lobby-card, .garage-card, .results-card, .login-card { max-width: calc(100vw - 24px); box-sizing: border-box; }
+  .login-card { padding: 32px 20px 24px; }
+  .brand-title { font-size: clamp(24px, 8vw, 40px); letter-spacing: 2px; white-space: nowrap; }
+}

@@ -24,7 +24,7 @@
 // ============================================================================
 
 import * as THREE from "three";
-import { isMobile } from "./device.js?v=88";
+import { isMobile } from "./device.js?v=89";
 
 /** mulberry32: tiny seeded PRNG (deterministic scenery / textures). */
 export function makeRng(seed) {
