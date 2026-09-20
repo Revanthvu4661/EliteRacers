@@ -161,13 +161,22 @@ export function setHudSpeed(kmh) {
 
 /** Health/damage meter. pct: 0-100 (caller clamps; this clamps again defensively
  *  so a bad input can never render a negative width or break the layout). */
+let _lastHp = 100;
 export function setHudHealth(pct) {
   const clamped = Math.max(0, Math.min(100, pct));
+  const hud = document.querySelector(".health-hud");
+  if (hud) {
+    const lvl = clamped > 60 ? "high" : clamped >= 30 ? "mid" : "low";
+    if (hud.dataset.level !== lvl) hud.dataset.level = lvl;
+    if (clamped < _lastHp - 0.01) { // damage taken: restart the flash + shake animation
+      hud.classList.remove("hit"); void hud.offsetWidth; hud.classList.add("hit");
+    }
+  }
+  _lastHp = clamped;
   $("#hud-health-pct").textContent = `${Math.round(clamped)}%`;
   const fill = $("#hud-health-fill");
   fill.style.width = `${clamped}%`;
-  // Low health reads as more urgent: a touch brighter/more saturated, not a new colour.
-  fill.style.filter = clamped < 30 ? "saturate(1.3) brightness(1.15)" : "none";
+  fill.style.filter = "none"; // colour + pulse now come from .health-hud[data-level] in styles.css
 }
 
 /** Reusable HUD banner (RESPAWNING / RECONNECTING / ...). Empty string hides it. */

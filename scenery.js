@@ -16,10 +16,10 @@
 
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { getTheme, makeRng, hashString } from "./themes.js?v=60";
-import { buildJungleModels } from "./jungle.js?v=60";
-import { buildJungleFx } from "./jungle-fx.js?v=60";
-import { createTreeAssets, THEME_TREES, TREE_QUALITY, pickQuality, makeWindUniform } from "./trees.js?v=60";
+import { getTheme, makeRng, hashString } from "./themes.js?v=62";
+import { buildJungleModels } from "./jungle.js?v=62";
+import { buildJungleFx } from "./jungle-fx.js?v=62";
+import { createTreeAssets, THEME_TREES, TREE_QUALITY, pickQuality, makeWindUniform } from "./trees.js?v=62";
 
 const SLOW_FRAME_S = 0.022;
 const SLOW_FOR_S = 2;

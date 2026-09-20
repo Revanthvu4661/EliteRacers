@@ -355,6 +355,38 @@ kbd {
   transition: width 200ms ease, filter 200ms ease;
 }
 
+/* Health meter redesign (visual only): heart icon, colour by level, glass sheen, damage flash. */
+.health-hud { --hc: #3ddc84; --hg: rgba(61,220,132,0.55); }
+.health-hud[data-level="mid"] { --hc: #ffb020; --hg: rgba(255,176,32,0.55); }
+.health-hud[data-level="low"] { --hc: #ff3b3b; --hg: rgba(255,59,59,0.7); }
+.health-row { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.health-icon { width: 20px; height: 20px; color: var(--hc); filter: drop-shadow(0 0 5px var(--hg)); flex: none; }
+.health-hud[data-level="low"] .health-icon { animation: hp-beat 0.7s ease-in-out infinite; }
+.health-label {
+  margin: 0; min-width: 44px; text-align: left; color: #fff; font-weight: 800; font-size: 15px;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.85), 0 0 8px rgba(0,0,0,0.5);
+}
+.health-bar {
+  position: relative; width: 150px; height: 16px; margin-left: 0; border-radius: 9px;
+  background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.22);
+  box-shadow: 0 0 12px var(--hg), inset 0 1px 3px rgba(0,0,0,0.6);
+  transition: box-shadow 250ms ease;
+}
+.health-fill {
+  position: relative; height: 100%; border-radius: 8px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.4) 0%, rgba(255,255,255,0) 50%, rgba(0,0,0,0.18) 100%), var(--hc);
+  transition: width 200ms ease, background-color 250ms ease;
+}
+.health-hud[data-level="low"] .health-bar { animation: hp-pulse 0.7s ease-in-out infinite; }
+.health-flash { position: absolute; inset: 0; border-radius: 9px; background: #ff2a2a; opacity: 0; pointer-events: none; }
+.health-hud.hit { animation: hp-shake 260ms ease-out; }
+.health-hud.hit .health-flash { animation: hp-flash 280ms ease-out; }
+@keyframes hp-shake { 0%,100% { transform: translateX(0); } 20% { transform: translateX(-6px); } 40% { transform: translateX(5px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(2px); } }
+@keyframes hp-flash { 0% { opacity: 0.9; } 100% { opacity: 0; } }
+@keyframes hp-pulse { 0%,100% { box-shadow: 0 0 8px var(--hg), inset 0 1px 3px rgba(0,0,0,0.6); } 50% { box-shadow: 0 0 22px var(--hg), 0 0 6px var(--hc), inset 0 1px 3px rgba(0,0,0,0.6); } }
+@keyframes hp-beat { 0%,100% { transform: scale(1); } 50% { transform: scale(1.25); } }
+@media (prefers-reduced-motion: reduce) { .health-hud.hit, .health-hud[data-level="low"] .health-bar, .health-hud[data-level="low"] .health-icon { animation: none; } }
+
 /* ---------- Loading overlay ---------- */
 #loading-overlay {
   position: fixed; inset: 0; z-index: 40;

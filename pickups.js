@@ -41,21 +41,20 @@ const BOB_SPEED = 2.4;
 const SPIN_SPEED = 1.8;
 
 function buildBoostMesh() {
+  // Visual only: additive glowing lightning bolt inside a spinning ring (same gold/orange as before).
   const g = new THREE.Group();
-  const core = new THREE.Mesh(
-    new THREE.IcosahedronGeometry(0.55, 0),
-    new THREE.MeshStandardMaterial({
-      color: 0xffe066, emissive: 0xffb800, emissiveIntensity: 2.2,
-      roughness: 0.25, metalness: 0.1,
-    })
-  );
-  core.castShadow = true;
-  const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(0.95, 0.07, 8, 24),
-    new THREE.MeshStandardMaterial({ color: 0xffb800, emissive: 0xff8c00, emissiveIntensity: 1.6, roughness: 0.4 })
-  );
+  const sh = new THREE.Shape();
+  [[0.16, 1], [-0.38, 0.05], [-0.04, 0.05], [-0.2, -1], [0.42, -0.12], [0.06, -0.12], [0.34, 0.5]].forEach(([x, y], i) => (i ? sh.lineTo(x, y) : sh.moveTo(x, y)));
+  const boltGeo = new THREE.ExtrudeGeometry(sh, { depth: 0.18, bevelEnabled: false });
+  boltGeo.center();
+  const glow = (color, opacity) => new THREE.MeshBasicMaterial({ color, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false, fog: true });
+  const bolt = new THREE.Mesh(boltGeo, glow(0xffc23a, 0.95));
+  bolt.scale.setScalar(0.9);
+  const halo = new THREE.Mesh(boltGeo, glow(0xff8c00, 0.35)); // slightly larger dim copy = soft glow
+  halo.scale.setScalar(1.2);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.95, 0.07, 8, 32), glow(0xffa000, 0.85));
   ring.rotation.x = Math.PI / 2.4;
-  g.add(core, ring);
+  g.add(bolt, halo, ring);
   g.add(new THREE.PointLight(0xffb800, 6, 8));
   return g;
 }
@@ -102,6 +101,45 @@ export function createPickups(scene, track) {
     const parts = mesh.children.filter((c) => !c.isLight);
     const lightIntensity = light ? light.intensity : 0;
     pickups.push({ id: `${kind}-${i}`, kind, u: 0, position: new THREE.Vector3(), mesh, light, parts, lightIntensity, available: true, respawnAt: 0, phase: i * 1.7 });
+  }
+
+  // Collect burst: ONE pooled Points (4 bursts x 12 particles), additive, fade by darkening the vertex
+  // colour (additive black = invisible). Built once here, no per-frame allocation.
+  const BURSTS = 4, PER = 12, LIFE = 0.45;
+  const bPos = new Float32Array(BURSTS * PER * 3), bCol = new Float32Array(BURSTS * PER * 3), bVel = new Float32Array(BURSTS * PER * 3);
+  const bGeo = new THREE.BufferGeometry();
+  bGeo.setAttribute("position", new THREE.BufferAttribute(bPos, 3));
+  bGeo.setAttribute("color", new THREE.BufferAttribute(bCol, 3));
+  const bMat = new THREE.PointsMaterial({ size: 0.4, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+  const bPts = new THREE.Points(bGeo, bMat);
+  bPts.frustumCulled = false; bPts.visible = false;
+  scene.add(bPts);
+  const bAge = new Float32Array(BURSTS).fill(-1), bTint = [[1, 0.75, 0.2], [0.25, 1, 0.55]], bKind = new Uint8Array(BURSTS);
+  let bNext = 0;
+  function spawnBurst(p) {
+    const k = bNext; bNext = (bNext + 1) % BURSTS;
+    bAge[k] = 0; bKind[k] = p.kind === "boost" ? 0 : 1; bPts.visible = true;
+    for (let i = 0; i < PER; i++) {
+      const j = (k * PER + i) * 3, a = Math.random() * 6.283, e = (Math.random() - 0.3) * 1.2, sp = 4 + Math.random() * 4;
+      bPos[j] = p.position.x; bPos[j + 1] = p.position.y; bPos[j + 2] = p.position.z;
+      bVel[j] = Math.cos(a) * sp; bVel[j + 1] = e * sp; bVel[j + 2] = Math.sin(a) * sp;
+    }
+  }
+  function stepBursts(dt) {
+    let any = false;
+    for (let k = 0; k < BURSTS; k++) {
+      if (bAge[k] < 0) continue;
+      bAge[k] += dt;
+      const f = Math.max(0, 1 - bAge[k] / LIFE), t = bTint[bKind[k]];
+      for (let i = 0; i < PER; i++) {
+        const j = (k * PER + i) * 3;
+        bPos[j] += bVel[j] * dt; bPos[j + 1] += bVel[j + 1] * dt; bPos[j + 2] += bVel[j + 2] * dt;
+        bCol[j] = t[0] * f; bCol[j + 1] = t[1] * f; bCol[j + 2] = t[2] * f;
+      }
+      if (bAge[k] >= LIFE) bAge[k] = -1; else any = true;
+    }
+    bGeo.attributes.position.needsUpdate = true; bGeo.attributes.color.needsUpdate = true;
+    if (!any) bPts.visible = false;
   }
 
   function setShown(p, shown) {
@@ -151,6 +189,7 @@ export function createPickups(scene, track) {
           p.available = false;
           p.respawnAt = now + RESPAWN_MS;
           setShown(p, false);
+          spawnBurst(p);
           if (p.kind === "boost") boostUntil = now + BOOST_MS;
           collected.push({ kind: p.kind });
         }
@@ -162,6 +201,7 @@ export function createPickups(scene, track) {
       p.mesh.position.y = p.position.y + Math.sin(now / 1000 * BOB_SPEED + p.phase) * BOB_AMPLITUDE;
     }
 
+    if (bPts.visible) stepBursts(dt);
     return { collected, boosted: now < boostUntil };
   }
 
@@ -172,10 +212,11 @@ export function createPickups(scene, track) {
   }
 
   function dispose() {
+    scene.remove(bPts); bGeo.dispose(); bMat.dispose();
     for (const p of pickups) {
       scene.remove(p.mesh);
       p.mesh.traverse((o) => {
-        if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); }
+        if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } // (bolt+halo share one geometry: double dispose is harmless)
       });
     }
   }
