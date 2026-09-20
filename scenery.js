@@ -16,8 +16,8 @@
 
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { getTheme, makeRng, hashString } from "./themes.js?v=56";
-import { createTreeAssets, THEME_TREES, TREE_QUALITY, pickQuality } from "./trees.js?v=56";
+import { getTheme, makeRng, hashString } from "./themes.js?v=58";
+import { createTreeAssets, THEME_TREES, TREE_QUALITY, pickQuality, makeWindUniform } from "./trees.js?v=58";
 
 const SLOW_FRAME_S = 0.022;
 const SLOW_FOR_S = 2;
@@ -143,7 +143,10 @@ const EXCLUDE_POINT_M = 15;      // checkpoints, pickups (the gantry/grandstand 
                                   // line's checkpoint, already covered by EXCLUDE_START_M)
 
 function buildTreesNew(group, track, rnd, P, theme, quality) {
-  const assets = createTreeAssets(theme.id, quality.id, hashString(track.id) + 3, null);
+  // One shared wind-time uniform for every tree material this build creates (bark and leaf,
+  // every species) - updated once per frame in update() below, never reallocated.
+  const windTime = makeWindUniform();
+  const assets = createTreeAssets(theme.id, quality.id, hashString(track.id) + 3, windTime);
   const mix = THEME_TREES[theme.id] || [];
   if (!mix.length || !assets.variants.length) return { assets, update() {}, dispose() {}, debug: null };
 
@@ -276,6 +279,29 @@ function buildTreesNew(group, track, rnd, P, theme, quality) {
     chunks.push({ idx: ci, center: sphereCentre.clone(), lodMeshes, activeLod: -1, count: items.length });
   }
 
+  // --- ground contact: ONE InstancedMesh of soft radial-gradient decals, one draw call, flat on
+  //     the ground at every tree's base. No real shadows (see file header) - this is what sells
+  //     "planted" instead. Scaled to roughly the crown radius so it reads as a soft footprint,
+  //     not a spotlight. --------------------------------------------------------------------
+  if (placed.length && assets.contactMaterial) {
+    const decalGeo = new THREE.CircleGeometry(1, 10);
+    decalGeo.rotateX(-Math.PI / 2);
+    const decals = new THREE.InstancedMesh(decalGeo, assets.contactMaterial, placed.length);
+    placed.forEach((p, i) => {
+      const variant = chunkVariant[p.chunkIdx];
+      const r = (variant ? variant.height : 10) * p.scale * 0.32;
+      m.makeScale(r, 1, r);
+      m.setPosition(p.x, 0.03, p.z);
+      decals.setMatrixAt(i, m);
+    });
+    decals.count = placed.length;
+    decals.castShadow = false;
+    decals.receiveShadow = false;
+    decals.frustumCulled = false; // spread the same way the old flat scenery sets are
+    decals.name = "tree-contact-decals";
+    group.add(decals);
+  }
+
   // --- per-frame (throttled) LOD selection: distance-only, 10% hysteresis, visibility toggle
   //     only - no allocation. ----------------------------------------------------------------
   let acc = 0;
@@ -294,7 +320,27 @@ function buildTreesNew(group, track, rnd, P, theme, quality) {
     }
     return cur;
   }
-  function updateLods(camera) {
+  // Adaptive budget (mirrors createWeather's particle-halving below): if the average frame time
+  // stays above 22 ms for 2 s, the farthest CURRENTLY VISIBLE chunk is hidden outright, at most
+  // one change every 3 s so it cannot chase a noisy frame time back and forth. Never un-hides -
+  // matching the brief ("hide the farthest chunks first"), a hidden chunk only returns when the
+  // camera gets close enough to re-enter it through the normal LOD pass.
+  let avgMs = 16, slowForMs = 0, lastCutAt = -Infinity, nowMs = 0;
+  function adaptiveCut(camera) {
+    let farthestChunk = null, farthestDist = -1;
+    for (const c of chunks) {
+      if (c.activeLod < 0) continue;
+      const dist = Math.hypot(c.center.x - camXZ.x, c.center.z - camXZ.y);
+      if (dist > farthestDist) { farthestDist = dist; farthestChunk = c; }
+    }
+    if (!farthestChunk) return;
+    farthestChunk.lodMeshes[farthestChunk.activeLod].visible = false;
+    farthestChunk.activeLod = -1;
+    farthestChunk.cut = true; // stays hidden until the camera's own distance re-enters it naturally
+    lastCutAt = nowMs;
+  }
+  function updateLods(camera, dtMs) {
+    nowMs += dtMs;
     camXZ.set(camera.position.x, camera.position.z);
     for (const c of chunks) {
       const dist = Math.hypot(c.center.x - camXZ.x, c.center.z - camXZ.y);
@@ -304,15 +350,21 @@ function buildTreesNew(group, track, rnd, P, theme, quality) {
       if (next >= 0) c.lodMeshes[next].visible = true;
       c.activeLod = next;
     }
+    avgMs = avgMs * 0.9 + dtMs * 0.1;
+    slowForMs = avgMs > 22 ? slowForMs + dtMs : 0;
+    if (slowForMs >= 2000 && nowMs - lastCutAt >= 3000) { adaptiveCut(camera); slowForMs = 0; }
   }
 
   return {
     assets,
     update(dt, camera) {
+      // Wind sways every frame (it would visibly stutter throttled to 250ms); LOD/adaptive-budget
+      // only needs to react at human timescales.
+      windTime.value += dt;
       acc += dt * 1000;
       if (acc < CHUNK_UPDATE_MS) return;
-      acc = 0;
-      updateLods(camera);
+      const elapsedMs = acc; acc = 0;
+      updateLods(camera, elapsedMs);
     },
     // Dev-only hook (harmless if never called): _dev/ scripts read this to verify placement -
     // every instance clear of the centreline by the briefed margin and of every exclusion zone.

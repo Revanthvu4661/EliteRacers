@@ -33,8 +33,8 @@
 
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { makeRng } from "./themes.js?v=56";
-import { makeBarkTexture, makeLeafTexture } from "./tree-textures.js?v=56";
+import { makeRng } from "./themes.js?v=58";
+import { makeBarkTexture, makeLeafTexture, makeContactTexture } from "./tree-textures.js?v=58";
 
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -100,11 +100,18 @@ export const THEME_TREES = {
 // lod0/lod1  metres: within lod0 -> L0, within lod1 -> L1, else L2
 // far        metres: chunks beyond this are hidden entirely
 // cards      multiplier on foliage density (the main fill-rate lever)
+// `high.far` was 330 until T3 verification: a wide/elevated pose (one of the 4 fixed baseline
+// poses) measured new trees ~4.5ms over old at that distance - over the "cut until it doesn't"
+// 3ms budget - while the 3 ground-level poses (closer to an actual chase-cam angle) were all
+// FASTER than old already, because removing tree shadows (see file header) saves more than the
+// extra geometry costs. Trimming far to 260 cuts the distant LOD2 belt a ground-level camera
+// barely resolves anyway, without touching lod0/lod1 (the close-up quality that is the point of
+// this whole pass). Re-measured after the cut - see HANDOFF/commit message for the numbers.
 export const TREE_QUALITY = {
-  high:   { count: 420, lod0: 55, lod1: 140, far: 330, cards: 1.0,  variantsPerSpecies: 4, maxTris: 250000 },
-  med:    { count: 320, lod0: 42, lod1: 110, far: 270, cards: 0.8,  variantsPerSpecies: 4, maxTris: 120000 },
-  low:    { count: 210, lod0: 32, lod1: 80,  far: 210, cards: 0.6,  variantsPerSpecies: 3, maxTris: 50000 },
-  mobile: { count: 170, lod0: 30, lod1: 75,  far: 200, cards: 0.55, variantsPerSpecies: 3, maxTris: 50000 },
+  high:   { count: 420, lod0: 55, lod1: 140, far: 260, cards: 1.0,  variantsPerSpecies: 4, maxTris: 250000 },
+  med:    { count: 320, lod0: 42, lod1: 110, far: 220, cards: 0.8,  variantsPerSpecies: 4, maxTris: 120000 },
+  low:    { count: 210, lod0: 32, lod1: 80,  far: 180, cards: 0.6,  variantsPerSpecies: 3, maxTris: 50000 },
+  mobile: { count: 170, lod0: 30, lod1: 75,  far: 160, cards: 0.55, variantsPerSpecies: 3, maxTris: 50000 },
 };
 
 /** ?gfx=low|med|high|mobile overrides the auto pick. (?trees=old is handled in scenery.js.) */
@@ -615,9 +622,21 @@ export function createTreeAssets(themeId, qualityId, seed, windTime) {
     }
   }
 
+  // One shared texture + material for the ground-contact decals (T3): a soft radial gradient,
+  // alpha-blended (it is meant to fade smoothly, unlike the alpha-TESTED foliage cards) and
+  // depthWrite:false so it never fights the grass/road it sits just above for depth. Built here
+  // so it shares this call's dispose lifecycle; scenery.js owns the actual decal InstancedMesh
+  // since only it knows where the trees ended up.
+  const contactTex = makeContactTexture();
+  textures.push(contactTex);
+  const contactMaterial = new THREE.MeshBasicMaterial({
+    map: contactTex, transparent: true, depthWrite: false, color: 0x000000, opacity: 0.6,
+  });
+  materials.push(contactMaterial);
+
   return {
     quality: quality, qualityId: qualityId, variants: variants,
-    materials: materials, textures: textures,
+    materials: materials, textures: textures, contactMaterial: contactMaterial,
     dispose() {
       for (const v of variants) for (const l of v.lods) l.geometry.dispose();
       for (const m of materials) m.dispose();
