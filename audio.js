@@ -219,6 +219,31 @@ export function rpmModel(kmh) {
 }
 const fundamental = (rpm) => (rpm / 60) * 4; // ~V8: 4 firing pulses per revolution
 
+// Per-car engine character (cars.js audioProfile), layered ON TOP of the speed/RPM model above:
+//   basePitchOffset  octaves added to the fundamental (2^offset multiplier, stacks with the RPM pitch)
+//   filterType/filterFrequency/filterQ  a BiquadFilterNode between the engine voice and the engine bus
+//   volumeMultiplier scales the engine voice gain
+const NEUTRAL_PROFILE = { basePitchOffset: 0, filterType: "lowpass", filterFrequency: 18000, filterQ: 0.5, volumeMultiplier: 1 };
+let profile = NEUTRAL_PROFILE;
+const pitchMul = () => Math.pow(2, profile.basePitchOffset || 0);
+// Band/high-pass filters remove most of the engine's energy, which made the Viper and RB19 ~5-7 dB
+// quieter than the low-passed cars in an offline level test (RMS at 50/120/200 km/h). This
+// compensation, calibrated for the filter settings in cars.js, brings all four within ~1 dB.
+const LOUDNESS_COMP = { lowpass: 1, bandpass: 2.15, highpass: 1.7 };
+const volMul = () => (profile.volumeMultiplier || 1) * (LOUDNESS_COMP[profile.filterType] || 1);
+
+/** Choose the engine profile for the next/current race (car select or race start). Safe to call any
+ *  time: a running engine is reconfigured in place (no graph rebuild), otherwise it applies at start. */
+export const setEngineProfile = safe((p) => {
+  profile = Object.assign({}, NEUTRAL_PROFILE, p || {});
+  if (eng && running()) {
+    const now = ctx.currentTime;
+    eng.charF.type = profile.filterType;
+    eng.charF.frequency.setTargetAtTime(profile.filterFrequency, now, 0.02);
+    eng.charF.Q.setTargetAtTime(profile.filterQ, now, 0.02);
+  }
+});
+
 let eng = null;
 let wantEngine = false; // a race is on; start (or restart) the engine as soon as the context runs
 
@@ -241,18 +266,19 @@ export const engineStart = safe(() => {
   const lp = mk(ctx.createBiquadFilter()); lp.type = "lowpass"; lp.Q.value = 2.5; lp.frequency.value = 600;
   const gEng = mk(ctx.createGain()); gEng.gain.value = 0;
   const gWhine = mk(ctx.createGain()); gWhine.gain.value = 0;
+  const charF = mk(ctx.createBiquadFilter()); charF.type = profile.filterType; charF.Q.value = profile.filterQ; charF.frequency.value = profile.filterFrequency;
   const bp = mk(ctx.createBiquadFilter()); bp.type = "bandpass"; bp.Q.value = 9; bp.frequency.value = 2400;
   const gSq = mk(ctx.createGain()); gSq.gain.value = 0;
   o1.connect(g1); o2.connect(g2); sub.connect(gs);
   g1.connect(lp); g2.connect(lp); gs.connect(lp);
-  lp.connect(gEng); gEng.connect(engBus);
+  lp.connect(gEng); gEng.connect(charF); charF.connect(engBus); // charF = per-car tone (see setEngineProfile)
   whine.connect(gWhine); gWhine.connect(engBus);
   sq.connect(bp); bp.connect(gSq); gSq.connect(engBus);
   [o1, o2, sub, whine, sq].forEach((s) => { s.start(); sources.push(s); });
   liveNodes += nodes.length;
-  eng = { nodes, sources, o1, o2, sub, whine, lp, gEng, gWhine, bp, gSq, rpm: IDLE_RPM, lastAt: 0, gear: 1, freq: 0 };
+  eng = { nodes, sources, o1, o2, sub, whine, lp, gEng, gWhine, bp, gSq, charF, rpm: IDLE_RPM, lastAt: 0, gear: 1, freq: 0 };
   // Ease in from silence.
-  gEng.gain.setTargetAtTime(0.06, ctx.currentTime, 0.15);
+  gEng.gain.setTargetAtTime(0.06 * volMul(), ctx.currentTime, 0.15);
 });
 
 export const engineUpdate = safe(({ kmh = 0, throttle = 0, boost = false, slip = 0, countdown = false } = {}) => {
@@ -265,14 +291,14 @@ export const engineUpdate = safe(({ kmh = 0, throttle = 0, boost = false, slip =
   eng.rpm += (m.rpm - eng.rpm) * 0.4;   // rev needle lag (also softens the upshift drop)
   eng.gear = m.gear;
   const thr = countdown ? 0 : clamp(Math.abs(throttle), 0, 1);
-  const f = fundamental(eng.rpm);
+  const f = fundamental(eng.rpm) * pitchMul(); // car character pitch stacks on the RPM pitch
   eng.freq = f;
   const tc = 0.045;
   eng.o1.frequency.setTargetAtTime(f, now, tc);
   eng.o2.frequency.setTargetAtTime(f, now, tc);
   eng.sub.frequency.setTargetAtTime(f * 0.5, now, tc);
   eng.lp.frequency.setTargetAtTime(450 + m.rf * 2300 + thr * 900, now, tc);
-  eng.gEng.gain.setTargetAtTime(0.05 + thr * 0.1 + m.rf * 0.05, now, 0.08);
+  eng.gEng.gain.setTargetAtTime((0.05 + thr * 0.1 + m.rf * 0.05) * volMul(), now, 0.08);
   eng.whine.frequency.setTargetAtTime(800 + (Number(kmh) || 0) * 7, now, tc);
   eng.gWhine.gain.setTargetAtTime(boost ? 0.045 : 0, now, 0.08);
   const s = clamp(slip, 0, 1);
@@ -381,6 +407,7 @@ export function audioStats() {
     engine: eng ? {
       gear: eng.gear, rpm: Math.round(eng.rpm), freqHz: +eng.o1.frequency.value.toFixed(1),
       gain: +eng.gEng.gain.value.toFixed(3), filterHz: Math.round(eng.lp.frequency.value),
+      profile: { pitchMul: +pitchMul().toFixed(3), type: eng.charF.type, hz: Math.round(eng.charF.frequency.value), q: +eng.charF.Q.value.toFixed(2), vol: profile.volumeMultiplier },
       whineGain: +eng.gWhine.gain.value.toFixed(3), squealGain: +eng.gSq.gain.value.toFixed(3),
     } : null,
   };
