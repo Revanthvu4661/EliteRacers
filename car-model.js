@@ -24,6 +24,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
+import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
 
 const DEFAULT_MODEL_URL = "./assets/models/ferrari.glb";
 const DRACO_PATH = "./assets/libs/draco/"; // decoder shipped locally: no CDN needed at demo time
@@ -152,7 +153,9 @@ function ferrariWheelData(ferrariTemplate) {
 function instantiateReal(template, carConfig, ferrariTemplate) {
   const fit = carConfig.fit || {};
   const hide = new Set(fit.hideMaterials || []);
-  const root = template.clone(true);
+  // Opt-in (cars.js fit.skinned): models with SkinnedMeshes need their skeleton rebound on clone,
+  // otherwise the body stays drawn at the template's own (world-origin) pose. Every other car is unchanged.
+  const root = fit.skinned ? cloneSkinned(template) : template.clone(true);
   const paint = new THREE.MeshPhysicalMaterial({
     color: carConfig.color, metalness: 0.55, roughness: 0.32, clearcoat: 1.0, clearcoatRoughness: 0.05,
   });

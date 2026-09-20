@@ -230,7 +230,8 @@ const pitchMul = () => Math.pow(2, profile.basePitchOffset || 0);
 // quieter than the low-passed cars in an offline level test (RMS at 50/120/200 km/h). This
 // compensation, calibrated for the filter settings in cars.js, brings all four within ~1 dB.
 const LOUDNESS_COMP = { lowpass: 1, bandpass: 2.15, highpass: 1.7 };
-const volMul = () => (profile.volumeMultiplier || 1) * (LOUDNESS_COMP[profile.filterType] || 1);
+// A profile may carry its own `loudnessComp` (measured for its exact filter settings); otherwise the per-type default.
+const volMul = () => (profile.volumeMultiplier || 1) * (profile.loudnessComp || LOUDNESS_COMP[profile.filterType] || 1);
 
 /** Choose the engine profile for the next/current race (car select or race start). Safe to call any
  *  time: a running engine is reconfigured in place (no graph rebuild), otherwise it applies at start. */

@@ -83,6 +83,62 @@ export const CARS = [
     engineSound: null,
     blurb: "Pure downforce. Rocket on straights, edgy in corners.",
   },
+  {
+    id: "one1",
+    name: "ONE:1",
+    model: "./assets/models/one1.glb", // Koenigsegg One:1, optimised (Draco + 1024px WebP) from a 45.9 MB source
+    paintMaterial: null, // keeps its own livery ("Stock only")
+    modelYaw: Math.PI,
+    fit: {},
+    scale: 1,
+    color: 0xd8d8dc,
+    stats: { topSpeed: 1.0, acceleration: 0.95, handling: 0.45 },
+    audioProfile: { basePitchOffset: 0.4, filterType: "bandpass", filterFrequency: 2600, filterQ: 1.4, volumeMultiplier: 1.05, loudnessComp: 3.0 },
+    engineSound: null,
+    blurb: "Absurd power. Handle with care.",
+  },
+  {
+    id: "gt3rs",
+    name: "GT3 RS",
+    model: "./assets/models/gt3rs.glb", // Porsche 992 GT3 RS, optimised from a 56.5 MB source
+    paintMaterial: null, // keeps its own livery ("Stock only")
+    modelYaw: Math.PI,
+    fit: { skinned: true }, // the model uses SkinnedMeshes: clone with SkeletonUtils (car-model.js)
+    scale: 1,
+    color: 0xf2b700,
+    stats: { topSpeed: 0.8, acceleration: 0.85, handling: 0.92 },
+    audioProfile: { basePitchOffset: 0.15, filterType: "highpass", filterFrequency: 1100, filterQ: 1.2, volumeMultiplier: 1.05, loudnessComp: 1.9 },
+    engineSound: null,
+    blurb: "Precision engineering. Turns in like magic.",
+  },
+  {
+    id: "gt3r",
+    name: "GT3 R",
+    model: "./assets/models/gt3r.glb", // Porsche 992 GT3 R (2024), optimised from a 37.2 MB source
+    paintMaterial: null, // keeps its own livery ("Stock only")
+    modelYaw: 0, // nose authored the other way round from the other cars (front faced the chase camera with PI)
+    fit: {},
+    scale: 1,
+    color: 0x1f9e5a,
+    stats: { topSpeed: 0.85, acceleration: 0.9, handling: 0.97 },
+    audioProfile: { basePitchOffset: 0.22, filterType: "highpass", filterFrequency: 1250, filterQ: 1.7, volumeMultiplier: 1.05, loudnessComp: 1.9 },
+    engineSound: null,
+    blurb: "Race-bred. Brakes later, corners harder.",
+  },
+  {
+    id: "r35",
+    name: "SILHOUETTE",
+    model: "./assets/models/r35.glb", // LB-Silhouette Works GT Nissan 35GT-RR (R35), optimised from a 2.2 MB source
+    paintMaterial: null, // keeps its own livery ("Stock only")
+    modelYaw: Math.PI,
+    fit: {},
+    scale: 1,
+    color: 0x7a2fd0,
+    stats: { topSpeed: 0.88, acceleration: 0.92, handling: 0.55 },
+    audioProfile: { basePitchOffset: -0.06, filterType: "lowpass", filterFrequency: 1500, filterQ: 2.5, volumeMultiplier: 1.05 },
+    engineSound: null,
+    blurb: "Widebody menace. All boost, no manners.",
+  },
 ];
 
 export const DEFAULT_CAR_ID = CARS[0].id;

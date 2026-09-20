@@ -11,24 +11,24 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=77";
-import * as ui from "./ui.js?v=77";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=77";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=77";
-import { buildTrack, getTrack, listTracks, getTrackPreview, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=77";
-import { createCameraRig } from "./camera.js?v=77";
-import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=77";
-import { commentate } from "./ai-commentary.js?v=77";
-import * as mp from "./multiplayer.js?v=77";
-import { createPickups } from "./pickups.js?v=77";
-import { createMinimap } from "./minimap.js?v=77";
-import { createEnvironment, getTheme } from "./themes.js?v=77";
-import { preloadNature } from "./nature-models.js?v=77";
-import { preloadOval, ovalReady } from "./oval-model.js?v=77";
-import { buildScenery } from "./scenery.js?v=77";
-import { createSpeedometer } from "./speedometer.js?v=77";
-import * as prog from "./progression.js?v=77";
-import * as audio from "./audio.js?v=77";
+import * as auth from "./auth.js?v=81";
+import * as ui from "./ui.js?v=81";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=81";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=81";
+import { buildTrack, getTrack, listTracks, getTrackPreview, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=81";
+import { createCameraRig } from "./camera.js?v=81";
+import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=81";
+import { commentate } from "./ai-commentary.js?v=81";
+import * as mp from "./multiplayer.js?v=81";
+import { createPickups } from "./pickups.js?v=81";
+import { createMinimap } from "./minimap.js?v=81";
+import { createEnvironment, getTheme } from "./themes.js?v=81";
+import { preloadNature } from "./nature-models.js?v=81";
+import { preloadOval, ovalReady } from "./oval-model.js?v=81";
+import { buildScenery } from "./scenery.js?v=81";
+import { createSpeedometer } from "./speedometer.js?v=81";
+import * as prog from "./progression.js?v=81";
+import * as audio from "./audio.js?v=81";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera
@@ -667,13 +667,34 @@ document.getElementById("btn-garage").addEventListener("click", () => { garageSt
 document.getElementById("btn-garage-back").addEventListener("click", () => goTo("select"));
 
 /** Translate the card strip so the selected card sits at the screen's centre. */
-function slideStrip() {
+function slideStrip(instant) {
   const sel = carList.querySelector(".car-card.selected");
   if (!sel) return;
-  const centre = sel.offsetLeft + sel.offsetWidth / 2;
-  carList.style.transform = `translateX(${Math.round(carList.clientWidth / 2 - centre)}px)`;
+  const left = Math.max(0, Math.round(sel.offsetLeft + sel.offsetWidth / 2 - carList.clientWidth / 2));
+  carList.scrollTo({ left, behavior: instant === true ? "auto" : "smooth" });
 }
-window.addEventListener("resize", slideStrip);
+window.addEventListener("resize", () => slideStrip(true));
+// The strip scrolls (8 cars): vertical mouse wheel scrolls it sideways, and a mouse can drag it
+// (touch scrolls natively). A drag never counts as a click on a card.
+carList.addEventListener("wheel", (e) => {
+  if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { carList.scrollLeft += e.deltaY; e.preventDefault(); }
+}, { passive: false });
+{
+  let down = false, moved = false, startX = 0, startLeft = 0;
+  carList.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "mouse" || e.button !== 0) return;
+    down = true; moved = false; startX = e.clientX; startLeft = carList.scrollLeft;
+  });
+  window.addEventListener("pointermove", (e) => {
+    if (!down) return;
+    const dx = e.clientX - startX;
+    if (!moved && Math.abs(dx) > 6) { moved = true; carList.classList.add("dragging"); }
+    if (moved) carList.scrollLeft = startLeft - dx;
+  });
+  const end = () => { if (!down) return; down = false; if (moved) setTimeout(() => carList.classList.remove("dragging"), 0); };
+  window.addEventListener("pointerup", end);
+  window.addEventListener("pointercancel", end);
+}
 
 // ---------------------------------------------------------------------------
 // TRACK SELECT (car-select -> track-select -> race)
