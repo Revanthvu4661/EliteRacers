@@ -10,25 +10,26 @@
 // ============================================================================
 
 import * as THREE from "three";
+import * as CANNON from "cannon-es";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=84";
-import * as ui from "./ui.js?v=84";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=84";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=84";
-import { buildTrack, getTrack, listTracks, getTrackPreview, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=84";
-import { createCameraRig } from "./camera.js?v=84";
-import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets, preloadModel, isModelCached } from "./car-model.js?v=84";
-import { commentate } from "./ai-commentary.js?v=84";
-import * as mp from "./multiplayer.js?v=84";
-import { createPickups } from "./pickups.js?v=84";
-import { createMinimap } from "./minimap.js?v=84";
-import { createEnvironment, getTheme } from "./themes.js?v=84";
-import { preloadNature } from "./nature-models.js?v=84";
-import { preloadOval, ovalReady } from "./oval-model.js?v=84";
-import { buildScenery } from "./scenery.js?v=84";
-import { createSpeedometer } from "./speedometer.js?v=84";
-import * as prog from "./progression.js?v=84";
-import * as audio from "./audio.js?v=84";
+import * as auth from "./auth.js?v=87";
+import * as ui from "./ui.js?v=87";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=87";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=87";
+import { buildTrack, getTrack, listTracks, getTrackPreview, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=87";
+import { createCameraRig } from "./camera.js?v=87";
+import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets, preloadModel, isModelCached } from "./car-model.js?v=87";
+import { commentate } from "./ai-commentary.js?v=87";
+import * as mp from "./multiplayer.js?v=87";
+import { createPickups } from "./pickups.js?v=87";
+import { createMinimap } from "./minimap.js?v=87";
+import { createEnvironment, getTheme } from "./themes.js?v=87";
+import { preloadNature } from "./nature-models.js?v=87";
+import { preloadOval, ovalReady } from "./oval-model.js?v=87";
+import { buildScenery } from "./scenery.js?v=87";
+import { createSpeedometer } from "./speedometer.js?v=87";
+import * as prog from "./progression.js?v=87";
+import * as audio from "./audio.js?v=87";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera
@@ -311,13 +312,21 @@ function buildCarRig(model) {
 
 // ---------------------------------------------------------------------------
 // Remote cars (multiplayer) - visual-only puppets driven by RTDB state, no
-// physics. Position/quaternion are interpolated toward the latest network
-// sample over REMOTE_LERP_MS to hide the ~80ms gap between writeMyState() ticks.
+// physics of their own. Position/quaternion are interpolated between the previous displayed pose and the
+// latest network sample over the MEASURED update interval (r.ivl, ~80 ms), extrapolated on the last known
+// velocity if an update is late, and snapped if a sample is implausibly far away. Each puppet also drives a
+// KINEMATIC cannon body (a moving proxy, never simulated) so the LOCAL car really collides with it.
 // ---------------------------------------------------------------------------
 const remotes = new Map(); // uid -> puppet
 const REAL_MODEL_WAIT_MS = 3000; // how long a race start waits for a real car model before using the fallback
 const knownNames = new Map(); // uid -> name, survives a player's own node being removed
-const REMOTE_LERP_MS = 120;
+const REMOTE_IVL_DEFAULT_MS = 80;  // expected network update interval until measured
+const REMOTE_DELAY_MIN_MS = 100;   // the puppet is drawn this far in the past (jitter buffer), so it can interpolate
+const REMOTE_EXTRAP_MAX_S = 0.3;   // never extrapolate further than this past the newest sample
+const REMOTE_SNAP_M = 20;          // a sample further than this from the newest one: snap, do not glide
+const REMOTE_MAX_SPEED = 120;      // m/s, clamp on derived velocities (network noise guard)
+const REMOTE_BUF = 8;              // samples kept per remote (ring, allocated once)
+const _tmpDir = new THREE.Vector3(); // scratch for the catch-up limiter (no per-frame allocation)
 
 // Minimap dots for remote players. Colour comes from the grid slot (mp.slotFor,
 // the same host-written order every client sees), so a given player is the same
@@ -379,6 +388,10 @@ function ensureRemotePuppet(uid, name, carId, initial) {
     from: { p: new THREE.Vector3(), q: new THREE.Quaternion() },
     to: { p: new THREE.Vector3(), q: new THREE.Quaternion() },
     tStart: performance.now(), hasState: false,
+    ivl: REMOTE_IVL_DEFAULT_MS, vel: new THREE.Vector3(), hasNet: false, lastUpdatedAt: null,
+    buf: Array.from({ length: REMOTE_BUF }, () => ({ t: 0, x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 1 })),
+    n: 0, head: 0, off: null, lastDrawAt: 0, _t: new THREE.Vector3(), _q1: new THREE.Quaternion(), _q2: new THREE.Quaternion(),
+    body: null, lastTickAt: 0, _pp: new THREE.Vector3(),
   };
   // Start on that racer's grid slot (same slot function as the local car) so the puppet is
   // already in the right place before its first network sample arrives.
@@ -406,15 +419,42 @@ function ensureRemotePuppet(uid, name, carId, initial) {
 /** Feed a fresh network sample: capture the current interpolated pose as the
  *  new lerp start so a burst of updates never makes the puppet jump backwards. */
 function applyRemoteState(r, netState) {
-  if (r.root) {
-    const alpha = Math.min(1, (performance.now() - r.tStart) / REMOTE_LERP_MS);
-    r.from.p.lerpVectors(r.from.p, r.to.p, alpha);
-    r.from.q.slerp(r.to.q, alpha);
-  }
-  r.to.p.set(netState.position.x, netState.position.y, netState.position.z);
-  r.to.q.set(netState.quaternion.x, netState.quaternion.y, netState.quaternion.z, netState.quaternion.w);
+  const np = netState.position, nq = netState.quaternion;
+  // Room updates fire for ANY player's write, so the same sample for this remote arrives again and again.
+  // Only a CHANGED sample counts: re-feeding a stale one used to restart the glide and made it stutter.
+  const ua = netState.updatedAt;
+  if (r.hasNet && ua === r.lastUpdatedAt && np.x === r.to.p.x && np.z === r.to.p.z && nq.w === r.to.q.w && nq.y === r.to.q.y) return;
+  const now = performance.now();
+  r.lastUpdatedAt = ua;
   r.speedKmh = Number(netState.speedKmh) || 0;
-  r.tStart = performance.now();
+  // Sample time = the SENDER's timestamp (evenly spaced by its write throttle, unlike arrival times, which
+  // carry all the network jitter). r.off maps sender time onto this machine's clock: it follows the fastest
+  // recent delivery and only creeps upward, so drift is tracked without the jitter leaking in.
+  const st = typeof ua === "number" && Number.isFinite(ua) ? ua : now;
+  const o = now - st;
+  r.off = r.off === null ? o : Math.min(o, r.off + 0.5);
+  const newest = r.n ? r.buf[(r.head + r.n - 1) % REMOTE_BUF] : null;
+  if (newest && (st - newest.t > 1500 || st < newest.t || Math.hypot(np.x - newest.x, np.z - newest.z) > REMOTE_SNAP_M)) {
+    r.n = 0; r.lastDrawAt = 0; r.vel.set(0, 0, 0); // teleport / respawn / long stall: drop the history, snap to the real position
+    if (r.root) { r.root.position.set(np.x, np.y, np.z); r.root.quaternion.set(nq.x, nq.y, nq.z, nq.w); }
+    r.snapped = true;
+  }
+  const prev = r.n ? r.buf[(r.head + r.n - 1) % REMOTE_BUF] : null;
+  let slot;
+  if (r.n < REMOTE_BUF) { slot = r.buf[(r.head + r.n) % REMOTE_BUF]; r.n++; }
+  else { slot = r.buf[r.head]; r.head = (r.head + 1) % REMOTE_BUF; }
+  slot.t = st; slot.x = np.x; slot.y = np.y; slot.z = np.z;
+  slot.qx = nq.x; slot.qy = nq.y; slot.qz = nq.z; slot.qw = nq.w;
+  if (prev && st > prev.t) {
+    const dts = (st - prev.t) / 1000;
+    r.ivl += (Math.min(250, Math.max(40, st - prev.t)) - r.ivl) * 0.3; // measured update interval (EMA)
+    r.vel.set((slot.x - prev.x) / dts, (slot.y - prev.y) / dts, (slot.z - prev.z) / dts);
+    if (r.vel.length() > REMOTE_MAX_SPEED) r.vel.setLength(REMOTE_MAX_SPEED);
+  }
+  r.to.p.set(np.x, np.y, np.z);
+  r.to.q.set(nq.x, nq.y, nq.z, nq.w);
+  r.hasNet = true;
+  r.tStart = now; // last arrival (the minimap uses it to hide stale dots)
   r.hasState = true;
   if (r.root) r.root.visible = true;
 }
@@ -424,6 +464,7 @@ function removeRemotePuppet(uid) {
   if (!r) return;
   remotes.delete(uid);
   try { audio.removeRemoteEngine(uid); } catch (_) { /* audio only */ }
+  if (r.body) { try { world.removeBody(r.body); } catch (_) { /* already gone */ } r.body = null; }
   if (r.root) { raceScene.remove(r.root); disposePuppet(r.root); }
 }
 
@@ -458,14 +499,79 @@ function clearRemotes() {
   for (const uid of [...remotes.keys()]) removeRemotePuppet(uid);
 }
 
+/** Draw a remote puppet at (now - delay) on the sender's timeline: interpolate between the two samples
+ *  that bracket that moment; if the newest sample is already older than that (an update is late), keep
+ *  moving on the last known velocity for a bounded time instead of freezing. */
+function drawRemote(r, now) {
+  const n = r.n;
+  if (!n) return;
+  const rt = now - Math.max(REMOTE_DELAY_MIN_MS, r.ivl * 1.5) - (r.off || 0); // render time, sender clock
+  const B = r.buf, at = (k) => B[(r.head + k) % REMOTE_BUF];
+  const newest = at(n - 1), oldest = at(0);
+  const T = r._t, q = r.root.quaternion;
+  if (n === 1 || rt <= oldest.t) { T.set(oldest.x, oldest.y, oldest.z); q.set(oldest.qx, oldest.qy, oldest.qz, oldest.qw); }
+  else if (rt >= newest.t) {
+    const ex = Math.min((rt - newest.t) / 1000, REMOTE_EXTRAP_MAX_S);
+    T.set(newest.x + r.vel.x * ex, newest.y + r.vel.y * ex, newest.z + r.vel.z * ex);
+    q.set(newest.qx, newest.qy, newest.qz, newest.qw);
+  } else {
+    let k = n - 2;
+    while (k > 0 && at(k).t > rt) k--;
+    const a = at(k), b = at(k + 1), f = (rt - a.t) / Math.max(1, b.t - a.t);
+    T.set(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f, a.z + (b.z - a.z) * f);
+    r._q1.set(a.qx, a.qy, a.qz, a.qw); r._q2.set(b.qx, b.qy, b.qz, b.qw);
+    q.slerpQuaternions(r._q1, r._q2, f);
+  }
+  // Catch-up limiter: after a stall the buffered target can jump ahead in one frame. Close the gap at a
+  // bounded speed (1.6x the car's own speed + 10 m/s) so the car visibly hurries instead of teleporting;
+  // a gap of REMOTE_SNAP_M or more is a genuine teleport and is applied at once.
+  const p = r.root.position;
+  const dt = r.lastDrawAt ? Math.min(0.1, Math.max(0.001, (now - r.lastDrawAt) / 1000)) : 0;
+  r.lastDrawAt = now;
+  const dx = T.x - p.x, dy = T.y - p.y, dz = T.z - p.z, dist = Math.hypot(dx, dy, dz);
+  const maxStep = (r.vel.length() * 1.6 + 10) * dt;
+  if (!dt || dist <= maxStep || dist >= REMOTE_SNAP_M) p.copy(T);
+  else p.addScaledVector(_tmpDir.set(dx, dy, dz), maxStep / dist);
+}
+
+/** Kinematic collision proxy for a remote car: a moving box the same size as the local chassis. It is
+ *  placed at the drawn pose each frame and given the matching velocity so a hit transfers a believable
+ *  impulse; it is never simulated (no forces, no gravity). Local-only: it exists on THIS client so the
+ *  local dynamic car collides with it, and does nothing to the remote player's own car on their screen.
+ *  The local chassis' existing "collide" listener (physics.js) turns any contact into the same
+ *  shake / damage / speed-cut reaction as a barrier hit. */
+function syncRemoteBody(r, now) {
+  const lay = state.race && state.race.rig && state.race.rig.layout;
+  if (!lay || !r.root) return;
+  if (!r.body) {
+    r.body = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
+    r.body.addShape(new CANNON.Box(new CANNON.Vec3(lay.halfLength, 0.3, lay.halfWidth)), new CANNON.Vec3(lay.centerX, 0.35, 0));
+    r.body.position.set(r.root.position.x, r.root.position.y, r.root.position.z);
+    world.addBody(r.body);
+    r.lastTickAt = now;
+    r._pp.copy(r.root.position);
+  }
+  const dt = Math.max(0.001, (now - r.lastTickAt) / 1000);
+  const p = r.root.position;
+  let vx = (p.x - r._pp.x) / dt, vz = (p.z - r._pp.z) / dt;
+  const sp = Math.hypot(vx, vz);
+  if (sp > REMOTE_MAX_SPEED) { vx *= REMOTE_MAX_SPEED / sp; vz *= REMOTE_MAX_SPEED / sp; }
+  if (dt > 0.25) { vx = 0; vz = 0; } // a stalled tab must not fling the proxy
+  r.body.position.set(p.x, p.y, p.z);
+  r.body.quaternion.set(r.root.quaternion.x, r.root.quaternion.y, r.root.quaternion.z, r.root.quaternion.w);
+  r.body.velocity.set(vx, 0, vz);
+  r.body.aabbNeedsUpdate = true;
+  r._pp.copy(p);
+  r.lastTickAt = now;
+}
+
 /** Advance every remote puppet's interpolation. Called once per rendered race frame. */
 function tickRemotes() {
   const now = performance.now();
   for (const [uid, r] of remotes) {
     if (!r.root || !r.hasState) continue;
-    const alpha = Math.min(1, (now - r.tStart) / REMOTE_LERP_MS);
-    r.root.position.lerpVectors(r.from.p, r.to.p, alpha);
-    r.root.quaternion.slerpQuaternions(r.from.q, r.to.q, alpha);
+    drawRemote(r, now);
+    try { syncRemoteBody(r, now); } catch (_) { /* collision proxy is best-effort */ }
     try {
       const me = state.race && state.race.veh.chassisBody.position;
       if (me) audio.remoteEngine(uid, Math.hypot(r.root.position.x - me.x, r.root.position.z - me.z), r.speedKmh || 0);
