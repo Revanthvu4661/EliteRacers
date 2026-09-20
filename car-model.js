@@ -28,7 +28,7 @@ import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
 
 const DEFAULT_MODEL_URL = "./assets/models/ferrari.glb";
 const DRACO_PATH = "./assets/libs/draco/"; // decoder shipped locally: no CDN needed at demo time
-const LOAD_TIMEOUT_MS = 8000;
+const LOAD_TIMEOUT_MS = 25000; // menu loads show a loading pill instead; the race start has its own shorter wait (loadCarModelQuick)
 
 // Purely cosmetic size bump - the car looked small relative to the track/other cars.
 // Applied to the returned `body` group and to each wheel's own mesh scale, AFTER
@@ -44,12 +44,27 @@ const VISUAL_SCALE = 1.4;
 
 const gltfCache = new Map(); // url -> Promise<gltf.scene>
 
+// ONE shared loader for every car model. It used to be created per model, and each DRACOLoader spins up
+// its own pool of decoder Web Workers (each fetching + compiling the WASM decoder) that were never freed,
+// so loading a few cars stacked up dozens of workers. Decoding runs in those workers (WASM), never on the
+// main thread; the pool is capped at 2.
+let sharedLoader = null;
+function getLoader() {
+  if (!sharedLoader) {
+    const draco = new DRACOLoader().setDecoderPath(DRACO_PATH).setDecoderConfig({ type: "wasm" });
+    draco.setWorkerLimit(2);
+    sharedLoader = new GLTFLoader().setDRACOLoader(draco);
+  }
+  return sharedLoader;
+}
+/** Resolve on the next frame so the browser can paint / handle input between heavy synchronous steps. */
+const yieldFrame = () => new Promise((res) => { let done = false; const f = () => { if (!done) { done = true; res(); } }; requestAnimationFrame(f); setTimeout(f, 50); });
+
 function loadGltfOnce(url) {
   if (!gltfCache.has(url)) {
     const p = new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("GLB load timed out")), LOAD_TIMEOUT_MS);
-      const draco = new DRACOLoader().setDecoderPath(DRACO_PATH);
-      const loader = new GLTFLoader().setDRACOLoader(draco);
+      const loader = getLoader();
       loader.load(
         url,
         (gltf) => { clearTimeout(timer); resolve(gltf.scene); },
@@ -62,6 +77,11 @@ function loadGltfOnce(url) {
   }
   return gltfCache.get(url);
 }
+
+/** Is this model's GLB already parsed and cached (this session)? */
+export function isModelCached(url) { return gltfCache.has(url); }
+/** Fetch + parse a car's GLB into the cache without building anything. Never rejects. */
+export function preloadModel(url) { return loadGltfOnce(url).then(() => true, () => false); }
 
 /** Kick off the GLB download early (call at boot). Never rejects. */
 export function preloadCarAssets() {
@@ -79,6 +99,7 @@ export async function loadCarModel(carConfig) {
         loadGltfOnce(carConfig.model),
         loadGltfOnce(DEFAULT_MODEL_URL).catch(() => null),
       ]);
+      await yieldFrame(); // parse just finished: let the browser breathe before the (synchronous) clone/fit pass
       const model = instantiateReal(template, carConfig, ferrari);
       if (model) return model;
     } catch (err) {

@@ -11,24 +11,24 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=83";
-import * as ui from "./ui.js?v=83";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=83";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=83";
-import { buildTrack, getTrack, listTracks, getTrackPreview, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=83";
-import { createCameraRig } from "./camera.js?v=83";
-import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=83";
-import { commentate } from "./ai-commentary.js?v=83";
-import * as mp from "./multiplayer.js?v=83";
-import { createPickups } from "./pickups.js?v=83";
-import { createMinimap } from "./minimap.js?v=83";
-import { createEnvironment, getTheme } from "./themes.js?v=83";
-import { preloadNature } from "./nature-models.js?v=83";
-import { preloadOval, ovalReady } from "./oval-model.js?v=83";
-import { buildScenery } from "./scenery.js?v=83";
-import { createSpeedometer } from "./speedometer.js?v=83";
-import * as prog from "./progression.js?v=83";
-import * as audio from "./audio.js?v=83";
+import * as auth from "./auth.js?v=84";
+import * as ui from "./ui.js?v=84";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=84";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=84";
+import { buildTrack, getTrack, listTracks, getTrackPreview, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=84";
+import { createCameraRig } from "./camera.js?v=84";
+import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets, preloadModel, isModelCached } from "./car-model.js?v=84";
+import { commentate } from "./ai-commentary.js?v=84";
+import * as mp from "./multiplayer.js?v=84";
+import { createPickups } from "./pickups.js?v=84";
+import { createMinimap } from "./minimap.js?v=84";
+import { createEnvironment, getTheme } from "./themes.js?v=84";
+import { preloadNature } from "./nature-models.js?v=84";
+import { preloadOval, ovalReady } from "./oval-model.js?v=84";
+import { buildScenery } from "./scenery.js?v=84";
+import { createSpeedometer } from "./speedometer.js?v=84";
+import * as prog from "./progression.js?v=84";
+import * as audio from "./audio.js?v=84";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera
@@ -172,13 +172,22 @@ const carLoadingEl = document.getElementById("car-loading");
 async function setShowcaseCar(carConfig) {
   const token = ++showcaseToken;
   const hint = setTimeout(() => { if (token === showcaseToken) carLoadingEl.hidden = false; }, 150);
+  const card = carList.querySelector(`.car-card[data-id="${carConfig.id}"]`);
+  if (card) card.classList.add("loading");
   showcaseLoading++;
   let model;
-  try { model = await loadCarModel(carConfig); } finally { showcaseLoading--; clearTimeout(hint); }
+  try { model = await loadCarModel(carConfig); } finally { showcaseLoading--; clearTimeout(hint); if (card) card.classList.remove("loading"); }
   if (token !== showcaseToken) return; // a newer selection won
+  const built = assembleStatic(model);
+  // Compile this car's shaders WITHOUT blocking (KHR_parallel_shader_compile) before it is first drawn: a
+  // model with dozens of new materials otherwise compiles them all synchronously inside the next render.
+  try {
+    if (renderer.compileAsync) await Promise.race([renderer.compileAsync(built, camera, showcaseScene), new Promise((r) => setTimeout(r, 4000))]);
+  } catch (_) { /* first render compiles instead */ }
   carLoadingEl.hidden = true;
+  if (token !== showcaseToken) return; // a newer selection won while compiling
   const previous = showcaseCar;
-  showcaseCar = assembleStatic(model);
+  showcaseCar = built;
   showcase.add(showcaseCar);
   try { fadeSwapShowcase(previous, showcaseCar); } catch (_) { if (previous) showcase.remove(previous); }
   // GLB failed (slow network)? Try once more a few seconds later.
@@ -186,6 +195,27 @@ async function setShowcaseCar(carConfig) {
     carConfig._retried = true;
     setTimeout(() => { if (token === showcaseToken) setShowcaseCar(carConfig); }, 5000);
   }
+}
+
+// Background preload of the rest of the roster: only once the select screen is up and idle, ONE model at a
+// time (fetch + parse only, no scene work), never while a car is being loaded, never during a race. Loads
+// the selected car first, then the others; already-cached models are skipped.
+let preloadRunning = false;
+async function preloadRosterInBackground() {
+  if (preloadRunning) return;
+  preloadRunning = true;
+  const idle = (ms) => new Promise((r) => (window.requestIdleCallback ? requestIdleCallback(() => setTimeout(r, ms), { timeout: 2000 }) : setTimeout(r, ms + 300)));
+  try {
+    try { if (navigator.connection && navigator.connection.saveData) return; } catch (_) { /* ignore */ }
+    const order = [getCar(state.carId), ...CARS.filter((c) => c.id !== state.carId)].filter((c) => c.model);
+    for (const car of order) {
+      if (isModelCached(car.model)) continue;
+      while (showcaseLoading > 0 && state.screen === "select") await idle(300);
+      await idle(400);
+      if (state.screen !== "select") return; // race / results: stop; it resumes next time select opens
+      await preloadModel(car.model);
+    }
+  } catch (_) { /* preload is best-effort */ } finally { preloadRunning = false; }
 }
 
 // ---------------------------------------------------------------------------
@@ -1543,7 +1573,7 @@ function goTo(screen) {
   keys.clear();
   if (screen === "select" || screen === "lobby") schedulePrewarm();
   if (screen === "tracks") renderTrackCards();
-  if (screen === "select") { renderCarCards(); refreshCoins(); setShowcaseCar(skinnedCar(getCar(state.carId))); }
+  if (screen === "select") { renderCarCards(); refreshCoins(); setShowcaseCar(skinnedCar(getCar(state.carId))); setTimeout(preloadRosterInBackground, 1200); }
   if (screen === "garage") renderGarage();
   if (screen === "race") { pmark("click"); startRace(); }
 }

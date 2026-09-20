@@ -164,6 +164,11 @@ kbd {
 .car-list::-webkit-scrollbar { display: none; }
 .car-list.dragging { cursor: grabbing; scroll-snap-type: none; }
 .car-list.dragging .car-card { pointer-events: none; }
+.car-card.loading { position: relative; }
+.car-card.loading::after {
+  content: ""; position: absolute; top: 10px; right: 10px; width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.18); border-top-color: var(--accent); animation: spin 800ms linear infinite;
+}
 .car-list .car-card { scroll-snap-align: center; user-select: none; -webkit-user-select: none; }
 .car-card {
   width: 200px; padding: 12px 14px; flex: none;
