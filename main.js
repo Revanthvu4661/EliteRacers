@@ -11,23 +11,24 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=65";
-import * as ui from "./ui.js?v=65";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=65";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=65";
-import { buildTrack, getTrack, listTracks, getTrackPreview, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=65";
-import { createCameraRig } from "./camera.js?v=65";
-import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=65";
-import { commentate } from "./ai-commentary.js?v=65";
-import * as mp from "./multiplayer.js?v=65";
-import { createPickups } from "./pickups.js?v=65";
-import { createMinimap } from "./minimap.js?v=65";
-import { createEnvironment, getTheme } from "./themes.js?v=65";
-import { preloadNature } from "./nature-models.js?v=65";
-import { buildScenery } from "./scenery.js?v=65";
-import { createSpeedometer } from "./speedometer.js?v=65";
-import * as prog from "./progression.js?v=65";
-import * as audio from "./audio.js?v=65";
+import * as auth from "./auth.js?v=69";
+import * as ui from "./ui.js?v=69";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=69";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=69";
+import { buildTrack, getTrack, listTracks, getTrackPreview, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=69";
+import { createCameraRig } from "./camera.js?v=69";
+import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=69";
+import { commentate } from "./ai-commentary.js?v=69";
+import * as mp from "./multiplayer.js?v=69";
+import { createPickups } from "./pickups.js?v=69";
+import { createMinimap } from "./minimap.js?v=69";
+import { createEnvironment, getTheme } from "./themes.js?v=69";
+import { preloadNature } from "./nature-models.js?v=69";
+import { preloadOval, ovalReady } from "./oval-model.js?v=69";
+import { buildScenery } from "./scenery.js?v=69";
+import { createSpeedometer } from "./speedometer.js?v=69";
+import * as prog from "./progression.js?v=69";
+import * as audio from "./audio.js?v=69";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera
@@ -202,7 +203,7 @@ let track = null;
 let scenery = null;
 /** The built track for `id` (rebuilt if a different track was loaded), with its theme + scenery. */
 function ensureTrack(id = state.trackId) {
-  if (track && track.id !== id) disposeTrack();
+  if (track && (track.id !== id || (track.wantsModel && !track.hasModel && ovalReady()))) disposeTrack(); // OVAL built before its model arrived: rebuild with it
   if (!track) {
     track = buildTrack(id, world, raceScene);
     env.apply(track.themeId);
@@ -735,6 +736,7 @@ function renderTrackCards() {
 
 function selectTrack(id) {
   state.trackId = getTrack(id).id;
+  if (state.trackId === "oval") preloadOval(); // start the 7.7 MB model download as soon as it is picked
   for (const el of trackList.children) el.classList.toggle("selected", el.dataset.id === state.trackId);
 }
 function moveTrackSelection(dir) {
@@ -784,7 +786,7 @@ function renderLobbyTrackPicker() {
     b.className = "track-pick" + (T.id === state.trackId ? " selected" : "");
     b.style.setProperty("--card-accent", getTheme(T.themeId).accent);
     b.textContent = T.name;
-    b.addEventListener("click", () => { state.trackId = T.id; renderLobbyTrackPicker(); });
+    b.addEventListener("click", () => { state.trackId = T.id; if (T.id === "oval") preloadOval(); renderLobbyTrackPicker(); });
     lobbyPicker.appendChild(b);
   }
 }
@@ -965,6 +967,8 @@ async function startRace() {
   await new Promise((res) => { requestAnimationFrame(() => setTimeout(res, 0)); setTimeout(res, 120); });
   if (state.screen !== "race") return;
 
+  if (raceTrackId === "oval") { try { await preloadOval(); } catch (_) { /* procedural fallback */ } }
+  if (state.screen !== "race") return;
   const t = ensureTrack(raceTrackId);
   const pickups = ensurePickups(t);
   pickups.reset();

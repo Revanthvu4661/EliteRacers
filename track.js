@@ -11,7 +11,8 @@
 
 import * as THREE from "three";
 import * as CANNON from "cannon-es";
-import { getTheme, makeGroundTexture, makeRoadMaterial, hashString } from "./themes.js?v=65";
+import { getTheme, makeGroundTexture, makeRoadMaterial, hashString } from "./themes.js?v=69";
+import { ovalReady, buildOvalGroup } from "./oval-model.js?v=69";
 
 // ---------------------------------------------------------------------------
 // TRACK DATA. A track is a plain data object; buildTrack(id, ...) turns it into geometry,
@@ -75,6 +76,11 @@ const HARBOR_NIGHTS_POINTS = [
   [-231.6, -121.5], [-224.5, -135.4], [-213.4, -146.5], [-199.5, -153.6],
 ];
 
+// Track 4 "OVAL": the outer speedway ring of assets/models/oval.glb. These points are the MEASURED
+// centreline of that ring in the model's own coordinates (model space = world space, no transform),
+// fitted to the tarmac triangles; the ring is 15-24 m wide. Start/finish is on the pit straight.
+const OVAL_POINTS = [[58,-25],[-1,-25],[-60,-25],[-102,-24],[-136,-31],[-198,-37],[-222,-49],[-242,-65],[-256,-82],[-267,-98],[-275,-116],[-280,-135],[-283,-162],[-280,-189],[-274,-208],[-266,-225],[-256,-242],[-241,-258],[-222,-273],[-198,-285],[-169,-293],[-136,-293],[-101,-295],[-60,-294],[-1,-294],[58,-294],[99,-293],[135,-293],[167,-292],[196,-285],[220,-273],[239,-258],[254,-242],[265,-226],[273,-208],[279,-190],[282,-162],[279,-134],[274,-115],[266,-98],[255,-81],[240,-64],[220,-49],[196,-38],[168,-31],[134,-27],[100,-24]];
+
 const boost = (t) => ({ kind: "boost", t });
 const repair = (t) => ({ kind: "repair", t });
 
@@ -133,6 +139,25 @@ export const TRACKS = [
     samples: 330,
     groundHalf: 700,
     groundMargin: 190,
+  },
+  {
+    id: "oval",
+    name: "OVAL",
+    place: "Super speedway",
+    weatherLabel: "Sunny",
+    controlPoints: OVAL_POINTS,
+    model: "./assets/models/oval.glb", // visual only; falls back to the procedural road if it is not loaded
+    width: 18,
+    laps: 3,
+    checkpointCount: 4,
+    pickups: [boost(0.08), boost(0.19), boost(0.36), boost(0.58), boost(0.69), boost(0.9),
+              repair(0.14), repair(0.45), repair(0.82)],
+    startT: 0,
+    themeId: "speedway",
+    difficulty: "Fast",
+    samples: 400,
+    groundHalf: 700,
+    groundMargin: 500,
   },
 ];
 
@@ -249,6 +274,10 @@ export function buildTrack(id, world, scene) {
   ground.position.set(groundRect.cx, 0, groundRect.cz);
   ground.receiveShadow = true;
   group.add(ground);
+  // OVAL: the measured model's flattened ground layers replace the procedural road; the plain ground
+  // plane drops below them and only shows beyond the model's own grass.
+  const ovalGroup = T.model && ovalReady() ? buildOvalGroup() : null;
+  if (ovalGroup) { ground.position.y = -0.4; group.add(ovalGroup); }
 
   // physics ground plane
   const groundBody = new CANNON.Body({ mass: 0 });
@@ -258,7 +287,7 @@ export function buildTrack(id, world, scene) {
   physicsBodies.push(groundBody);
 
   // --- Road ribbon ----------------------------------------------------------
-  {
+  if (!ovalGroup) {
     const rows = N + 1;
     const pos = new Float32Array(rows * 2 * 3);
     const uv = new Float32Array(rows * 2 * 2);
@@ -478,6 +507,7 @@ export function buildTrack(id, world, scene) {
 
   return {
     id: T.id, name: T.name, place: T.place, weatherLabel: T.weatherLabel, themeId: T.themeId,
+    wantsModel: !!T.model, hasModel: !!ovalGroup,
     difficulty: T.difficulty, laps: T.laps, width: cfg.width, barrierOffset: cfg.barrierOffset,
     group, curve, length, samples, checkpoints, pickups, halfWidth: hw, bounds, groundRect,
     nearest, startPose, sampleAt, tangentAt, gridSlot, dispose,

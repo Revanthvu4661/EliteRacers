@@ -130,6 +130,10 @@ export const THEMES = {
 function classicTheme() {
   try { return new URLSearchParams(location.search).get("theme") === "classic"; } catch (_) { return false; }
 }
+THEMES.speedway = { // OVAL: the classic bright sunny look, no scenery of its own (the model provides the ground)
+  ...THEMES.sunny, id: "speedway", accent: "#4fc3ff", sceneryId: "none",
+  ground: { kind: "grass", base: "#4f8a3a", roughness: 1, metalness: 0 },
+};
 export function getTheme(id) {
   if (id === "sunny" && !classicTheme()) return THEMES.jungle;
   return THEMES[id] || THEMES.sunny;
