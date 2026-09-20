@@ -16,8 +16,9 @@
 
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { getTheme, makeRng, hashString } from "./themes.js?v=58";
-import { createTreeAssets, THEME_TREES, TREE_QUALITY, pickQuality, makeWindUniform } from "./trees.js?v=58";
+import { getTheme, makeRng, hashString } from "./themes.js?v=59";
+import { buildJungleModels } from "./jungle.js?v=59";
+import { createTreeAssets, THEME_TREES, TREE_QUALITY, pickQuality, makeWindUniform } from "./trees.js?v=59";
 
 const SLOW_FRAME_S = 0.022;
 const SLOW_FOR_S = 2;
@@ -689,13 +690,14 @@ export function buildScenery(themeId, track, scene) {
   group.name = "scenery-" + theme.id;
   const rnd = makeRng(hashString(track.id) + 1);
   const P = makePlacement(track, rnd);
-  let treeAssets = null, treesHandle = null;
+  let treeAssets = null, treesHandle = null, jungleHandle = null;
   if (theme.sceneryId === "trees") {
     if (treesWanted()) {
       const qualityId = pickQuality();
       const quality = Object.assign({ id: qualityId }, TREE_QUALITY[qualityId] || TREE_QUALITY.high);
       treesHandle = buildTreesNew(group, track, rnd, P, theme, quality);
       treeAssets = treesHandle.assets;
+      if (theme.id === "jungle") { try { jungleHandle = buildJungleModels(scene, track, rnd, P, qualityId); } catch (err) { console.warn("[jungle] build failed", err); } }
     } else buildTreesOld(group, track, rnd, P);
   }
   else if (theme.sceneryId === "mesa") buildMesa(group, track, rnd, P);
@@ -708,15 +710,18 @@ export function buildScenery(themeId, track, scene) {
     group, weather, themeId: theme.id,
     // Dev-only: _dev/ scripts read this to verify tree placement (never referenced by game code).
     treesDebug: treesHandle && treesHandle.debug,
+    get jungle() { return jungleHandle; },
     update(dt, camera) {
       if (disposed) return;
       if (weather) weather.step(dt, camera);
       if (treesHandle) treesHandle.update(dt, camera);
+      if (jungleHandle) jungleHandle.update(dt, camera);
     },
     dispose() {
       if (disposed) return;
       disposed = true;
       scene.remove(group);
+      if (jungleHandle) { try { jungleHandle.dispose(); } catch (_) {} jungleHandle = null; }
       disposeTree(group);
       // Frees every LOD's geometry/material/texture, including whichever tiers (L1/L2, or the
       // hidden ones for a given chunk) disposeTree's traversal above still sees since ALL tiers

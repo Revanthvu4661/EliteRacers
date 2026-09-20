@@ -33,8 +33,8 @@
 
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { makeRng } from "./themes.js?v=58";
-import { makeBarkTexture, makeLeafTexture, makeContactTexture } from "./tree-textures.js?v=58";
+import { makeRng } from "./themes.js?v=59";
+import { makeBarkTexture, makeLeafTexture, makeContactTexture } from "./tree-textures.js?v=59";
 
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -89,6 +89,8 @@ export const THEME_TREES = {
   sunny: [["broadleaf", 0.62], ["conifer", 0.26], ["birch", 0.12]],
   // The other two themes keep their own scenery (mesa rocks / container port) and get no trees.
   // The empty mixes are here so a future track can switch one on without touching this file.
+  // Jungle: procedural broadleaf as the base, <=10% conifer (far belt feel), a few birch.
+  jungle: [["broadleaf", 0.8], ["conifer", 0.08], ["birch", 0.12]],
   desert: [],
   nightRain: [],
 };

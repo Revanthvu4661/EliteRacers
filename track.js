@@ -11,7 +11,7 @@
 
 import * as THREE from "three";
 import * as CANNON from "cannon-es";
-import { getTheme, makeGroundTexture, makeRoadMaterial, hashString } from "./themes.js?v=58";
+import { getTheme, makeGroundTexture, makeRoadMaterial, hashString } from "./themes.js?v=59";
 
 // ---------------------------------------------------------------------------
 // TRACK DATA. A track is a plain data object; buildTrack(id, ...) turns it into geometry,
@@ -81,7 +81,7 @@ const repair = (t) => ({ kind: "repair", t });
 export const TRACKS = [
   {
     id: "green-valley",
-    name: "Green Valley",
+    name: (() => { try { return new URLSearchParams(location.search).get("theme") === "classic" ? "Green Valley" : "Jungle Run"; } catch (_) { return "Jungle Run"; } })(),
     place: "Lowland countryside",
     weatherLabel: "Sunny",
     controlPoints: GREEN_VALLEY_POINTS,

@@ -11,22 +11,23 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=58";
-import * as ui from "./ui.js?v=58";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=58";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=58";
-import { buildTrack, getTrack, listTracks, getTrackPreview, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=58";
-import { createCameraRig } from "./camera.js?v=58";
-import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=58";
-import { commentate } from "./ai-commentary.js?v=58";
-import * as mp from "./multiplayer.js?v=58";
-import { createPickups } from "./pickups.js?v=58";
-import { createMinimap } from "./minimap.js?v=58";
-import { createEnvironment, getTheme } from "./themes.js?v=58";
-import { buildScenery } from "./scenery.js?v=58";
-import { createSpeedometer } from "./speedometer.js?v=58";
-import * as prog from "./progression.js?v=58";
-import * as audio from "./audio.js?v=58";
+import * as auth from "./auth.js?v=59";
+import * as ui from "./ui.js?v=59";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=59";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=59";
+import { buildTrack, getTrack, listTracks, getTrackPreview, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=59";
+import { createCameraRig } from "./camera.js?v=59";
+import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=59";
+import { commentate } from "./ai-commentary.js?v=59";
+import * as mp from "./multiplayer.js?v=59";
+import { createPickups } from "./pickups.js?v=59";
+import { createMinimap } from "./minimap.js?v=59";
+import { createEnvironment, getTheme } from "./themes.js?v=59";
+import { preloadNature } from "./nature-models.js?v=59";
+import { buildScenery } from "./scenery.js?v=59";
+import { createSpeedometer } from "./speedometer.js?v=59";
+import * as prog from "./progression.js?v=59";
+import * as audio from "./audio.js?v=59";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera
@@ -194,6 +195,7 @@ raceScene.environment = envMap;
 const world = createWorld();
 // Sky, sun, hemisphere light, fog and the single headlight are created ONCE here and only have their
 // properties changed per track (env.apply) - lights are never added or removed after this point.
+preloadNature(); // async, never blocks; jungle GLB trees appear once loaded, else procedural only
 const env = createEnvironment(raceScene, renderer);
 env.apply("sunny");
 let track = null;

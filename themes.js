@@ -65,6 +65,27 @@ export const THEMES = {
     headlight: 0,
   },
 
+  // JUNGLE_LOOK: humid pale teal sky, green-teal fog, dark loam ground, greenish hemi, warm moderate
+  // sun. Applied to Green Valley (track id unchanged) unless ?theme=classic (see getTheme).
+  jungle: {
+    id: "jungle",
+    accent: "#7fd08a",
+    sky: { top: 0x6f9aa0, mid: 0xa9c9c4, horizon: 0xd6e6dc },
+    background: 0xbdd3c9,
+    fog: { color: 0xa9c4b6, near: 40, far: 300 },
+    sun: { color: 0xffe2b8, intensity: 1.9, offset: [60, 90, 40], shadowFar: 320 },
+    hemi: { sky: 0xb4d6c4, ground: 0x2a2a18, intensity: 0.6 },
+    exposure: 0.96,
+    ground: { kind: "moss", base: "#2b3a1e", roughness: 1, metalness: 0 },
+    road: { base: "#2f3236", grain: 26, roughness: 0.78, metalness: 0.05, envMapIntensity: 1, wet: false },
+    kerb: [0xd8262a, 0xf2f2f2],
+    barrier: { white: 0xf0f0f0, a: 0xd8262a, b: 0x2a5cd8, roughness: 0.7 },
+    sceneryId: "trees",
+    particles: null,
+    lightning: null,
+    headlight: 0,
+  },
+
   // Track 2: hot late afternoon, low orange-gold sun, warm dusty haze.
   desert: {
     id: "desert",
@@ -106,7 +127,13 @@ export const THEMES = {
   },
 };
 
-export function getTheme(id) { return THEMES[id] || THEMES.sunny; }
+function classicTheme() {
+  try { return new URLSearchParams(location.search).get("theme") === "classic"; } catch (_) { return false; }
+}
+export function getTheme(id) {
+  if (id === "sunny" && !classicTheme()) return THEMES.jungle;
+  return THEMES[id] || THEMES.sunny;
+}
 
 // ---------------------------------------------------------------------------
 // Procedural textures
@@ -130,6 +157,20 @@ export function makeGroundTexture(theme, seed = 1) {
       const v = 60 + rnd() * 60;
       g.fillStyle = `rgb(${v * 0.55 | 0}, ${v + 40 | 0}, ${v * 0.45 | 0})`;
       g.fillRect(rnd() * 256, rnd() * 256, 2 + rnd() * 3, 2 + rnd() * 3);
+    }
+  } else if (kind === "moss") { // dark loam + moss, leaf litter and mud patches, soft macro variation
+    g.fillStyle = theme.ground.base; g.fillRect(0, 0, 256, 256);
+    for (let i = 0; i < 40; i++) { // large soft macro blobs (moss / mud), wrap-free but low contrast
+      const x = rnd() * 256, y = rnd() * 256, r = 25 + rnd() * 50, mud = rnd() < 0.4;
+      const gr = g.createRadialGradient(x, y, 0, x, y, r);
+      gr.addColorStop(0, mud ? "rgba(70,52,34,0.35)" : "rgba(50,78,34,0.32)"); gr.addColorStop(1, "rgba(0,0,0,0)");
+      g.fillStyle = gr;
+      for (const ox of [-256, 0, 256]) for (const oy of [-256, 0, 256]) { g.save(); g.translate(ox, oy); g.fillRect(x - r, y - r, r * 2, r * 2); g.restore(); }
+    }
+    for (let i = 0; i < 1800; i++) {
+      const v = 30 + rnd() * 45, k = rnd();
+      g.fillStyle = k < 0.55 ? `rgb(${v * 0.6 | 0}, ${v + 14 | 0}, ${v * 0.4 | 0})` : k < 0.85 ? `rgb(${v + 30 | 0}, ${v * 0.7 + 14 | 0}, ${v * 0.3 | 0})` : `rgb(${v * 0.9 + 10 | 0}, ${v * 0.75 | 0}, ${v * 0.5 | 0})`;
+      g.fillRect(rnd() * 256, rnd() * 256, 1.5 + rnd() * 4, 1.5 + rnd() * 2.5);
     }
   } else if (kind === "sand") {
     for (let i = 0; i < 3400; i++) {
