@@ -27,6 +27,8 @@ const CELL = 2;                       // m, height-map resolution
 const X0 = -620, X1 = 660, Z0 = -640, Z1 = 460;
 const FULL_M = 80, FADE_M = 220;      // re-level fully within FULL_M of the racing line, none beyond FADE_M
 const ROAD_TOP = 0.02;
+const ROAD_KEEP_M = 8;                // nothing low and solid-looking (walls, fences, tyres, props) may stand within this of the racing line: the model has no colliders
+const LOW_M = 4.5;                    // ... but anything higher than this (bridges, gantries, banners) stays
 const ROAD_CLEAR_M = 12;              // props without colliders closer than this to the racing line are removed
 const HEIGHT_LAYERS = ["1GRASS", "0GRASS2", "1GRAVEL", "1TARMAC"]; // rasterised in this order (later wins)
 
@@ -115,13 +117,15 @@ function prepare(pts) {
   }
   // 3. per-cell shift = weight(distance to the racing line) * (height - ROAD_TOP)
   const shift = new Float32Array(GW * GH);
+  const dist = new Float32Array(GW * GH).fill(1e9);
   for (let gz = 0; gz < GH; gz++) {
     const pz = Z0 + (gz + 0.5) * CELL;
     for (let gx = 0; gx < GW; gx++) {
-      const h = height[gz * GW + gx];
-      if (Number.isNaN(h)) continue;
       const px = X0 + (gx + 0.5) * CELL;
       const best = distToLine(px, pz);
+      dist[gz * GW + gx] = best;
+      const h = height[gz * GW + gx];
+      if (Number.isNaN(h)) continue;
       const w = best <= FULL_M ? 1 : best >= FADE_M ? 0 : 1 - (best - FULL_M) / (FADE_M - FULL_M);
       shift[gz * GW + gx] = w * (h - ROAD_TOP);
     }
@@ -131,6 +135,14 @@ function prepare(pts) {
     if (gx < 0 || gz < 0 || gx >= GW || gz >= GH) return 0;
     return shift[gz * GW + gx];
   };
+
+  const distAt = (x, z) => {
+    const gx = Math.floor((x - X0) / CELL), gz = Math.floor((z - Z0) / CELL);
+    if (gx < 0 || gz < 0 || gx >= GW || gz >= GH) return 1e9;
+    return dist[gz * GW + gx];
+  };
+  const GROUND = /^(1TARMAC|1GRASS|0GRASS2|1GRAVEL|line_seg|Rectangle|Cylinder001)/;
+  const KEEP_ALL = /^(overpass_middle|startlights|large_banner|baloon)/;
 
   // 4. bake world matrices and apply the shift: plain meshes per vertex, instanced parts per instance
   const m = new THREE.Matrix4(), inst = new THREE.Matrix4(), w = new THREE.Vector3();
@@ -156,6 +168,21 @@ function prepare(pts) {
         }
         o.count = kept;
       }
+      if (!KEEP_ALL.test(o.name) && !GROUND.test(o.name)) {
+        const gp = o.geometry.attributes.position, stepG = Math.max(1, Math.floor(gp.count / 60));
+        let kept = 0;
+        for (let i = 0; i < o.count; i++) {
+          o.getMatrixAt(i, inst);
+          let bad = false;
+          for (let k = 0; k < gp.count && !bad; k += stepG) {
+            w.fromBufferAttribute(gp, k).applyMatrix4(inst);
+            if (w.y < LOW_M && distAt(w.x, w.z) < ROAD_KEEP_M) bad = true;
+          }
+          if (bad) continue;
+          o.setMatrixAt(kept++, inst);
+        }
+        o.count = kept;
+      }
       o.instanceMatrix.needsUpdate = true;
       o.userData.baked = "instanced";
     } else {
@@ -163,6 +190,19 @@ function prepare(pts) {
       const p = o.geometry.attributes.position;
       for (let i = 0; i < p.count; i++) p.setY(i, p.getY(i) - dyAt(p.getX(i), p.getZ(i)));
       p.needsUpdate = true;
+      const ix = o.geometry.index;
+      if (ix && !GROUND.test(o.name) && !KEEP_ALL.test(o.name)) {
+        const src = ix.array, out = new src.constructor(src.length);
+        let n = 0;
+        for (let t = 0; t < src.length; t += 3) {
+          const a = src[t], b = src[t + 1], c = src[t + 2];
+          const cx = (p.getX(a) + p.getX(b) + p.getX(c)) / 3, cz = (p.getZ(a) + p.getZ(b) + p.getZ(c)) / 3;
+          const topY = Math.max(p.getY(a), p.getY(b), p.getY(c));
+          if (topY < LOW_M && distAt(cx, cz) < ROAD_KEEP_M) continue;
+          out[n++] = a; out[n++] = b; out[n++] = c;
+        }
+        if (n < src.length) o.geometry.setIndex(new THREE.BufferAttribute(out.slice(0, n), 1));
+      }
       o.geometry.computeBoundingSphere(); o.geometry.computeBoundingBox();
       o.userData.baked = "plain";
     }
