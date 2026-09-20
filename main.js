@@ -11,24 +11,24 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import * as auth from "./auth.js?v=69";
-import * as ui from "./ui.js?v=69";
-import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=69";
-import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=69";
-import { buildTrack, getTrack, listTracks, getTrackPreview, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=69";
-import { createCameraRig } from "./camera.js?v=69";
-import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=69";
-import { commentate } from "./ai-commentary.js?v=69";
-import * as mp from "./multiplayer.js?v=69";
-import { createPickups } from "./pickups.js?v=69";
-import { createMinimap } from "./minimap.js?v=69";
-import { createEnvironment, getTheme } from "./themes.js?v=69";
-import { preloadNature } from "./nature-models.js?v=69";
-import { preloadOval, ovalReady } from "./oval-model.js?v=69";
-import { buildScenery } from "./scenery.js?v=69";
-import { createSpeedometer } from "./speedometer.js?v=69";
-import * as prog from "./progression.js?v=69";
-import * as audio from "./audio.js?v=69";
+import * as auth from "./auth.js?v=71";
+import * as ui from "./ui.js?v=71";
+import { CARS, DEFAULT_CAR_ID, getCar } from "./cars.js?v=71";
+import { createWorld, stepWorld, createVehicle, TUNING } from "./physics.js?v=71";
+import { buildTrack, getTrack, listTracks, getTrackPreview, DEFAULT_TRACK_ID, gridOffsets } from "./track.js?v=71";
+import { createCameraRig } from "./camera.js?v=71";
+import { loadCarModel, loadCarModelQuick, assembleStatic, preloadCarAssets } from "./car-model.js?v=71";
+import { commentate } from "./ai-commentary.js?v=71";
+import * as mp from "./multiplayer.js?v=71";
+import { createPickups } from "./pickups.js?v=71";
+import { createMinimap } from "./minimap.js?v=71";
+import { createEnvironment, getTheme } from "./themes.js?v=71";
+import { preloadNature } from "./nature-models.js?v=71";
+import { preloadOval, ovalReady } from "./oval-model.js?v=71";
+import { buildScenery } from "./scenery.js?v=71";
+import { createSpeedometer } from "./speedometer.js?v=71";
+import * as prog from "./progression.js?v=71";
+import * as audio from "./audio.js?v=71";
 
 // ---------------------------------------------------------------------------
 // Renderer + camera

@@ -11,8 +11,8 @@
 
 import * as THREE from "three";
 import * as CANNON from "cannon-es";
-import { getTheme, makeGroundTexture, makeRoadMaterial, hashString } from "./themes.js?v=69";
-import { ovalReady, buildOvalGroup } from "./oval-model.js?v=69";
+import { getTheme, makeGroundTexture, makeRoadMaterial, hashString } from "./themes.js?v=71";
+import { ovalReady, buildOvalGroup } from "./oval-model.js?v=71";
 
 // ---------------------------------------------------------------------------
 // TRACK DATA. A track is a plain data object; buildTrack(id, ...) turns it into geometry,
@@ -148,6 +148,7 @@ export const TRACKS = [
     controlPoints: OVAL_POINTS,
     model: "./assets/models/oval.glb", // visual only; falls back to the procedural road if it is not loaded
     width: 18,
+    barrierOffset: 2.5, // wall line 11.5 m from the centre = where the model's own barriers stand
     laps: 3,
     checkpointCount: 4,
     pickups: [boost(0.08), boost(0.19), boost(0.36), boost(0.58), boost(0.69), boost(0.9),
@@ -228,7 +229,7 @@ function checkerTexture(cols = 12, rows = 3) {
 export function buildTrack(id, world, scene) {
   const T = getTrack(id);
   const cfg = { ...TRACK_CONFIG, width: T.width, laps: T.laps, checkpoints: T.checkpointCount,
-                samples: T.samples, bounds: T.groundHalf };
+                samples: T.samples, bounds: T.groundHalf, barrierOffset: T.barrierOffset != null ? T.barrierOffset : TRACK_CONFIG.barrierOffset };
   const hw = cfg.width / 2;
   const theme = getTheme(T.themeId);
   const seed = hashString(T.id);
@@ -276,7 +277,7 @@ export function buildTrack(id, world, scene) {
   group.add(ground);
   // OVAL: the measured model's flattened ground layers replace the procedural road; the plain ground
   // plane drops below them and only shows beyond the model's own grass.
-  const ovalGroup = T.model && ovalReady() ? buildOvalGroup() : null;
+  const ovalGroup = T.model && ovalReady() ? buildOvalGroup(T.controlPoints) : null;
   if (ovalGroup) { ground.position.y = -0.4; group.add(ovalGroup); }
 
   // physics ground plane
@@ -321,7 +322,7 @@ export function buildTrack(id, world, scene) {
   }
 
   // --- Curbs (instanced, alternating red/white) -----------------------------
-  {
+  if (!ovalGroup) { // (OVAL with its model: the model has its own kerbs/aprons)
     const geo = new THREE.BoxGeometry(cfg.curbSpacing * 0.98, 0.14, 0.9 * SCALE);
     const count = Math.floor(length / cfg.curbSpacing);
     const red = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ color: theme.kerb[0], roughness: 0.6 }), count);
@@ -411,7 +412,7 @@ export function buildTrack(id, world, scene) {
     wallBody.updateAABB();
     world.addBody(wallBody);
     physicsBodies.push(wallBody);
-    mesh.count = count;
+    mesh.count = ovalGroup ? 0 : count; // OVAL with its model: the model's own barriers are the visible walls; only the collider is ours
     mesh.castShadow = mesh.receiveShadow = true;
     group.add(mesh);
   }
@@ -434,7 +435,7 @@ export function buildTrack(id, world, scene) {
     line.position.set(s.p.x, 0.03, s.p.z);
     line.receiveShadow = true;
     group.add(line);
-    group.add(makeGrandstand(s, hw));
+    if (!ovalGroup) group.add(makeGrandstand(s, hw)); // (the model has its own stands)
   }
 
   scene.add(group);
